@@ -2209,7 +2209,10 @@ class GitHubSync {
             throw new Error('请先登录');
         }
         
-        const filePath = `${this.folderName}/${fileName}`;
+        // 如果fileName已经包含文件夹路径，直接使用；否则添加默认文件夹
+        const filePath = fileName.includes('/') ? 
+            `${this.folderName}/${fileName}` : 
+            `${this.folderName}/${fileName}`;
         console.log('删除文件路径:', filePath);
         
         // 首先获取文件的SHA
@@ -3154,7 +3157,13 @@ async function deleteMindmap(id) {
             if (mindmap.fileName) {
                 console.log('尝试删除GitHub文件:', mindmap.fileName);
                 try {
-                    const result = await window.githubSync.deleteMindmap(mindmap.fileName);
+                    // 构建正确的文件路径，考虑文件夹结构
+                    const folderPath = mindmap.folderId ? 
+                        window.mindmapManager.getFolder(mindmap.folderId).name : '';
+                    const fullPath = folderPath ? `${folderPath}/${mindmap.fileName}` : mindmap.fileName;
+                    
+                    console.log('删除文件完整路径:', fullPath);
+                    const result = await window.githubSync.deleteMindmap(fullPath);
                     githubDeleteSuccess = true;
                     console.log('GitHub文件删除成功:', result);
                 } catch (error) {
@@ -3330,7 +3339,13 @@ async function deleteFolder(id) {
             for (const mindmap of mindmapsInFolder) {
                 if (mindmap.fileName) {
                     try {
-                        await window.githubSync.deleteMindmap(mindmap.fileName);
+                        // 构建正确的文件路径，考虑文件夹结构
+                        const folderPath = mindmap.folderId ? 
+                            window.mindmapManager.getFolder(mindmap.folderId).name : '';
+                        const fullPath = folderPath ? `${folderPath}/${mindmap.fileName}` : mindmap.fileName;
+                        
+                        console.log('删除文件夹内文件:', fullPath);
+                        await window.githubSync.deleteMindmap(fullPath);
                     } catch (error) {
                         console.warn('删除GitHub文件失败:', error.message);
                     }
