@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI思维导图</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 顶部工具栏 -->
+        <div class="toolbar">
+            <div class="toolbar-left">
+                <h1>🧠 AI思维导图</h1>
+            </div>
+            <div class="toolbar-right">
+                <button id="undoBtn" class="btn btn-secondary" title="撤销">↶ 撤销</button>
+                <button id="redoBtn" class="btn btn-secondary" title="重做">↷ 重做</button>
+                <button id="settingsBtn" class="btn btn-secondary">⚙️ AI设置</button>
+                <button id="exportMarkdownBtn" class="btn btn-primary">📄 导出Markdown</button>
+                <button id="exportTxtBtn" class="btn btn-primary">📝 导出TXT</button>
+                <button id="exportHtmlBtn" class="btn btn-primary">🌐 导出HTML</button>
+                <button id="resetViewBtn" class="btn btn-secondary">🔄 重置视图</button>
+            </div>
+        </div>
+
+        <!-- 画布容器 -->
+        <div id="canvasContainer" class="canvas-container">
+            <svg id="canvas" width="100%" height="100%">
+                <g id="linesGroup"></g>
+                <g id="nodesGroup"></g>
+            </svg>
+        </div>
+
+        <!-- 右键菜单 -->
+        <div id="contextMenu" class="context-menu" style="display: none;">
+            <div class="context-menu-item" data-action="addChild">➕ 添加子节点</div>
+            <div class="context-menu-item" data-action="addSibling">➡️ 添加兄弟节点</div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" data-action="aiExpand">🤖 AI扩展</div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" data-action="delete">🗑️ 删除节点</div>
+        </div>
+
+        <!-- AI设置模态框 -->
+        <div id="settingsModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>AI API 设置</h2>
+                    <span class="close">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="apiProvider">API 提供商：</label>
+                        <select id="apiProvider" class="form-control">
+                            <option value="deepseek">DeepSeek</option>
+                            <option value="gemini">Google Gemini</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="custom">自定义</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="apiKey">API Key：</label>
+                        <input type="password" id="apiKey" class="form-control" placeholder="输入您的API Key">
+                    </div>
+                    <div class="form-group" id="customUrlGroup" style="display: none;">
+                        <label for="customUrl">自定义API URL：</label>
+                        <input type="text" id="customUrl" class="form-control" placeholder="https://api.example.com/v1/chat/completions">
+                    </div>
+                    <div class="form-group">
+                        <label for="modelName">模型名称：</label>
+                        <select id="modelSelect" class="form-control" style="display: none;">
+                            <option value="">选择模型...</option>
+                        </select>
+                        <input type="text" id="modelName" class="form-control" placeholder="例如: deepseek-chat 或搜索模型">
+                        <div id="modelLoadingStatus" class="model-loading-status"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="saveSettingsBtn" class="btn btn-primary">💾 保存设置</button>
+                    <button id="cancelSettingsBtn" class="btn btn-secondary">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI扩展模态框 -->
+        <div id="aiExpandModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>AI扩展节点</h2>
+                    <span class="close">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="aiPrompt">提示词：</label>
+                        <textarea id="aiPrompt" class="form-control" rows="4" placeholder="输入提示词，使用 @节点名称 引用其他节点内容"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>可引用的节点：</label>
+                        <div id="nodeReferenceList" class="node-reference-list"></div>
+                    </div>
+                    <div id="aiExpandStatus" class="ai-status"></div>
+                </div>
+                <div class="modal-footer">
+                    <button id="executeAiExpandBtn" class="btn btn-primary">🚀 执行AI扩展</button>
+                    <button id="cancelAiExpandBtn" class="btn btn-secondary">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
