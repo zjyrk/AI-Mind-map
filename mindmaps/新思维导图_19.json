@@ -1,1 +1,1 @@
-null
+"{\"nodes\":[{\"id\":1,\"text\":\"中心主题11\",\"x\":404,\"y\":300,\"width\":108,\"height\":50,\"parentId\":null,\"collapsed\":false},{\"id\":2,\"text\":\"新节点\",\"x\":549,\"y\":300,\"width\":82,\"height\":50,\"parentId\":1,\"collapsed\":false}],\"nextId\":3,\"rootId\":1}"
