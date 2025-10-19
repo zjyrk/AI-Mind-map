@@ -21,6 +21,7 @@
                 <button id="exportTxtBtn" class="btn btn-primary">📝 导出TXT</button>
                 <button id="exportHtmlBtn" class="btn btn-primary">🌐 导出HTML</button>
                 <button id="resetViewBtn" class="btn btn-secondary">🔄 重置视图</button>
+                <button id="githubBtn" class="btn btn-primary">☁️ GitHub同步</button>
             </div>
         </div>
 
@@ -79,6 +80,55 @@
                 <div class="modal-footer">
                     <button id="saveSettingsBtn" class="btn btn-primary">💾 保存设置</button>
                     <button id="cancelSettingsBtn" class="btn btn-secondary">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- GitHub同步模态框 -->
+        <div id="githubModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>☁️ GitHub云同步</h2>
+                    <span class="close" id="githubModalClose">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div id="githubLoginSection">
+                        <p style="margin-bottom: 20px; color: #666;">使用GitHub存储你的思维导图数据，随时随地访问</p>
+                        <div class="form-group">
+                            <label for="githubUsername">GitHub用户名：</label>
+                            <input type="text" id="githubUsername" class="form-control" placeholder="zjyrk" value="zjyrk">
+                        </div>
+                        <div class="form-group">
+                            <label for="githubRepo">仓库名：</label>
+                            <input type="text" id="githubRepo" class="form-control" placeholder="AI-Mind-map" value="AI-Mind-map">
+                        </div>
+                        <div class="form-group">
+                            <label for="githubToken">Personal Access Token：</label>
+                            <input type="password" id="githubToken" class="form-control" placeholder="ghp_...">
+                            <small style="display: block; margin-top: 5px; color: #666;">
+                                需要repo权限，<a href="https://github.com/settings/tokens" target="_blank" style="color: #667eea;">点击获取</a>
+                            </small>
+                        </div>
+                    </div>
+                    
+                    <div id="githubSyncSection" style="display: none;">
+                        <p style="margin-bottom: 20px;">
+                            <span style="color: #4CAF50; font-weight: 500;">✅ 已登录：</span>
+                            <span id="githubUserDisplay" style="font-weight: 600;"></span>
+                        </p>
+                        <div id="githubStatus" class="status-message"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <div id="githubLoginButtons">
+                        <button id="githubLoginBtn" class="btn btn-primary">🔐 登录</button>
+                        <button id="cancelGithubBtn" class="btn btn-secondary">取消</button>
+                    </div>
+                    <div id="githubSyncButtons" style="display: none;">
+                        <button id="githubSaveBtn" class="btn btn-primary">☁️ 保存到云端</button>
+                        <button id="githubLoadBtn" class="btn btn-secondary">📥 从云端加载</button>
+                        <button id="githubLogoutBtn" class="btn btn-secondary">退出登录</button>
+                    </div>
                 </div>
             </div>
         </div>

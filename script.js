@@ -1914,7 +1914,289 @@ class MindMap {
     }
 }
 
+// GitHub同步管理类
+class GitHubSync {
+    constructor() {
+        this.username = null;
+        this.repo = null;
+        this.token = null;
+        this.isLoggedIn = false;
+        this.fileName = 'mindmap-data.json';
+    }
+    
+    async login(username, repo, token) {
+        this.username = username;
+        this.repo = repo;
+        this.token = token;
+        
+        // 验证token
+        try {
+            const response = await fetch('https://api.github.com/user', {
+                headers: {
+                    'Authorization': `token ${token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+            
+            if (response.ok) {
+                const user = await response.json();
+                this.isLoggedIn = true;
+                
+                // 保存到localStorage
+                localStorage.setItem('github_username', username);
+                localStorage.setItem('github_repo', repo);
+                localStorage.setItem('github_token', token);
+                
+                return { success: true, user };
+            } else {
+                throw new Error('Token验证失败');
+            }
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    }
+    
+    logout() {
+        this.username = null;
+        this.repo = null;
+        this.token = null;
+        this.isLoggedIn = false;
+        
+        localStorage.removeItem('github_username');
+        localStorage.removeItem('github_repo');
+        localStorage.removeItem('github_token');
+    }
+    
+    loadCredentials() {
+        const username = localStorage.getItem('github_username');
+        const repo = localStorage.getItem('github_repo');
+        const token = localStorage.getItem('github_token');
+        
+        if (username && repo && token) {
+            this.username = username;
+            this.repo = repo;
+            this.token = token;
+            this.isLoggedIn = true;
+            return true;
+        }
+        return false;
+    }
+    
+    async saveData(data) {
+        if (!this.isLoggedIn) {
+            throw new Error('请先登录');
+        }
+        
+        const content = JSON.stringify(data, null, 2);
+        const encodedContent = btoa(unescape(encodeURIComponent(content)));
+        
+        // 首先检查文件是否存在
+        let sha = null;
+        try {
+            const getResponse = await fetch(
+                `https://api.github.com/repos/${this.username}/${this.repo}/contents/${this.fileName}`,
+                {
+                    headers: {
+                        'Authorization': `token ${this.token}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                }
+            );
+            
+            if (getResponse.ok) {
+                const fileData = await getResponse.json();
+                sha = fileData.sha;
+            }
+        } catch (error) {
+            // 文件不存在，继续创建
+        }
+        
+        // 创建或更新文件
+        const body = {
+            message: `Update mindmap - ${new Date().toLocaleString('zh-CN')}`,
+            content: encodedContent
+        };
+        
+        if (sha) {
+            body.sha = sha;
+        }
+        
+        const response = await fetch(
+            `https://api.github.com/repos/${this.username}/${this.repo}/contents/${this.fileName}`,
+            {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/vnd.github.v3+json'
+                },
+                body: JSON.stringify(body)
+            }
+        );
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || '保存失败');
+        }
+        
+        return await response.json();
+    }
+    
+    async loadData() {
+        if (!this.isLoggedIn) {
+            throw new Error('请先登录');
+        }
+        
+        const response = await fetch(
+            `https://api.github.com/repos/${this.username}/${this.repo}/contents/${this.fileName}`,
+            {
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            }
+        );
+        
+        if (!response.ok) {
+            if (response.status === 404) {
+                throw new Error('云端没有找到数据文件');
+            }
+            throw new Error('加载失败');
+        }
+        
+        const fileData = await response.json();
+        const content = decodeURIComponent(escape(atob(fileData.content)));
+        return JSON.parse(content);
+    }
+}
+
 // 初始化应用
 document.addEventListener('DOMContentLoaded', () => {
     window.mindMap = new MindMap();
+    window.githubSync = new GitHubSync();
+    
+    // GitHub按钮事件
+    const githubBtn = document.getElementById('githubBtn');
+    const githubModal = document.getElementById('githubModal');
+    const githubModalClose = document.getElementById('githubModalClose');
+    const cancelGithubBtn = document.getElementById('cancelGithubBtn');
+    
+    githubBtn.addEventListener('click', () => {
+        githubModal.style.display = 'flex';
+        
+        // 检查是否已登录
+        if (window.githubSync.loadCredentials()) {
+            showGithubSyncSection();
+        }
+    });
+    
+    githubModalClose.addEventListener('click', () => {
+        githubModal.style.display = 'none';
+    });
+    
+    cancelGithubBtn.addEventListener('click', () => {
+        githubModal.style.display = 'none';
+    });
+    
+    // GitHub登录
+    const githubLoginBtn = document.getElementById('githubLoginBtn');
+    githubLoginBtn.addEventListener('click', async () => {
+        const username = document.getElementById('githubUsername').value.trim();
+        const repo = document.getElementById('githubRepo').value.trim();
+        const token = document.getElementById('githubToken').value.trim();
+        
+        if (!username || !repo || !token) {
+            showGithubStatus('请填写完整信息', 'error');
+            return;
+        }
+        
+        showGithubStatus('正在登录...', 'info');
+        githubLoginBtn.disabled = true;
+        
+        const result = await window.githubSync.login(username, repo, token);
+        
+        githubLoginBtn.disabled = false;
+        
+        if (result.success) {
+            showGithubStatus('登录成功！', 'success');
+            setTimeout(() => {
+                showGithubSyncSection();
+                document.getElementById('githubUserDisplay').textContent = `${username}/${repo}`;
+            }, 500);
+        } else {
+            showGithubStatus(`登录失败：${result.error}`, 'error');
+        }
+    });
+    
+    // 保存到云端
+    const githubSaveBtn = document.getElementById('githubSaveBtn');
+    githubSaveBtn.addEventListener('click', async () => {
+        showGithubStatus('正在保存...', 'info');
+        githubSaveBtn.disabled = true;
+        
+        try {
+            const state = window.mindMap.serializeState();
+            await window.githubSync.saveData(state);
+            showGithubStatus('✅ 保存成功！', 'success');
+        } catch (error) {
+            showGithubStatus(`❌ 保存失败：${error.message}`, 'error');
+        }
+        
+        githubSaveBtn.disabled = false;
+    });
+    
+    // 从云端加载
+    const githubLoadBtn = document.getElementById('githubLoadBtn');
+    githubLoadBtn.addEventListener('click', async () => {
+        if (!confirm('加载云端数据会覆盖当前内容，是否继续？')) {
+            return;
+        }
+        
+        showGithubStatus('正在加载...', 'info');
+        githubLoadBtn.disabled = true;
+        
+        try {
+            const data = await window.githubSync.loadData();
+            window.mindMap.restoreState(data);
+            showGithubStatus('✅ 加载成功！', 'success');
+        } catch (error) {
+            showGithubStatus(`❌ 加载失败：${error.message}`, 'error');
+        }
+        
+        githubLoadBtn.disabled = false;
+    });
+    
+    // 退出登录
+    const githubLogoutBtn = document.getElementById('githubLogoutBtn');
+    githubLogoutBtn.addEventListener('click', () => {
+        window.githubSync.logout();
+        showGithubLoginSection();
+        showGithubStatus('', '');
+    });
+    
+    function showGithubLoginSection() {
+        document.getElementById('githubLoginSection').style.display = 'block';
+        document.getElementById('githubSyncSection').style.display = 'none';
+        document.getElementById('githubLoginButtons').style.display = 'flex';
+        document.getElementById('githubSyncButtons').style.display = 'none';
+    }
+    
+    function showGithubSyncSection() {
+        document.getElementById('githubLoginSection').style.display = 'none';
+        document.getElementById('githubSyncSection').style.display = 'block';
+        document.getElementById('githubLoginButtons').style.display = 'none';
+        document.getElementById('githubSyncButtons').style.display = 'flex';
+        document.getElementById('githubUserDisplay').textContent = 
+            `${window.githubSync.username}/${window.githubSync.repo}`;
+    }
+    
+    function showGithubStatus(message, type) {
+        const statusDiv = document.getElementById('githubStatus');
+        statusDiv.textContent = message;
+        statusDiv.className = 'status-message';
+        if (type) {
+            statusDiv.classList.add(type);
+        }
+        statusDiv.style.display = message ? 'block' : 'none';
+    }
 });
