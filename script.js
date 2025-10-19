@@ -2659,8 +2659,13 @@ function updateMindmapList() {
         `;
     }).join('');
     
-    // 添加点击事件
-    mindmapList.addEventListener('click', (e) => {
+    // 移除旧的事件监听器（如果存在）
+    if (mindmapList._clickHandler) {
+        mindmapList.removeEventListener('click', mindmapList._clickHandler);
+    }
+    
+    // 创建新的事件处理函数
+    const clickHandler = (e) => {
         const mindmapItem = e.target.closest('.mindmap-item');
         if (mindmapItem) {
             const id = parseInt(mindmapItem.dataset.id);
@@ -2678,7 +2683,11 @@ function updateMindmapList() {
                 deleteMindmap(id);
             }
         }
-    });
+    };
+    
+    // 添加新的事件监听器
+    mindmapList.addEventListener('click', clickHandler);
+    mindmapList._clickHandler = clickHandler;
 }
 
 // 选择思维导图
@@ -2742,6 +2751,12 @@ async function selectMindmap(id) {
 
 // 删除思维导图
 async function deleteMindmap(id) {
+    // 防止重复调用
+    if (window._deletingMindmap) {
+        console.log('删除操作正在进行中，请稍候...');
+        return;
+    }
+    
     const mindmap = window.mindmapManager.getMindmap(id);
     if (!mindmap) return;
     
@@ -2754,9 +2769,14 @@ async function deleteMindmap(id) {
         githubLoggedIn: window.githubSync.isLoggedIn
     });
     
-    if (!confirm(`确定要删除思维导图"${mindmap.name}"吗？\n\n文件名: ${mindmap.fileName}\nGitHub状态: ${window.githubSync.isLoggedIn ? '已登录' : '未登录'}`)) {
+    const confirmMessage = `确定要删除思维导图"${mindmap.name}"吗？\n\n文件名: ${mindmap.fileName}\nGitHub状态: ${window.githubSync.isLoggedIn ? '已登录' : '未登录'}`;
+    
+    if (!confirm(confirmMessage)) {
         return;
     }
+    
+    // 设置删除标志
+    window._deletingMindmap = true;
     
     try {
         let githubDeleteSuccess = false;
@@ -2804,6 +2824,9 @@ async function deleteMindmap(id) {
     } catch (error) {
         console.error('删除思维导图时出错:', error);
         alert(`删除失败：${error.message}`);
+    } finally {
+        // 清除删除标志
+        window._deletingMindmap = false;
     }
 }
 
