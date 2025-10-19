@@ -1981,6 +1981,9 @@ class GitHubSync {
         this.token = null;
         this.isLoggedIn = false;
         this.folderName = 'mindmaps'; // 思维导图文件夹
+        
+        // 从本地存储恢复登录状态
+        this.loadFromLocalStorage();
     }
     
     async login(username, repo, token) {
@@ -2073,6 +2076,7 @@ class GitHubSync {
         }
         
         const content = JSON.stringify(data, null, 2);
+        // 使用UTF-8编码确保中文字符正确处理
         const encodedContent = btoa(unescape(encodeURIComponent(content)));
         const filePath = folderPath ? `${this.folderName}/${folderPath}/${fileName}` : `${this.folderName}/${fileName}`;
         
@@ -2270,6 +2274,7 @@ class GitHubSync {
         }
         
         const content = JSON.stringify(aiConfig, null, 2);
+        // 使用UTF-8编码确保中文字符正确处理
         const encodedContent = btoa(unescape(encodeURIComponent(content)));
         const filePath = 'ai-settings.json';
         
@@ -2341,6 +2346,7 @@ class GitHubSync {
             
             if (response.ok) {
                 const fileData = await response.json();
+                // GitHub API返回的content已经是base64编码的，需要先解码
                 const content = atob(fileData.content);
                 return JSON.parse(content);
             } else if (response.status === 404) {
@@ -2464,6 +2470,7 @@ class GitHubSync {
                 if (!localFileMap.has(relativePath)) {
                     try {
                         console.log('下载新文件:', relativePath);
+                        // GitHub API返回的content已经是base64编码的，需要先解码
                         const content = atob(githubFile.content);
                         const data = JSON.parse(content);
                         
@@ -2514,6 +2521,15 @@ class GitHubSync {
                     const localTime = new Date(localMindmap.updatedAt).getTime();
                     const githubTime = new Date(githubFile.lastModified).getTime();
                     
+                    console.log(`比较文件 ${relativePath}:`, {
+                        localTime: localMindmap.updatedAt,
+                        githubTime: githubFile.lastModified,
+                        localTimestamp: localTime,
+                        githubTimestamp: githubTime,
+                        localNewer: localTime > githubTime,
+                        githubNewer: githubTime > localTime
+                    });
+                    
                     if (localTime > githubTime) {
                         // 本地更新，上传到GitHub
                         try {
@@ -2530,6 +2546,7 @@ class GitHubSync {
                         // GitHub更新，下载到本地
                         try {
                             console.log('更新本地文件:', relativePath);
+                            // GitHub API返回的content已经是base64编码的，需要先解码
                             const content = atob(githubFile.content);
                             const data = JSON.parse(content);
                             localMindmap.data = data;
@@ -2538,6 +2555,31 @@ class GitHubSync {
                         } catch (error) {
                             console.error('更新本地文件失败:', relativePath, error);
                             syncResults.errors.push(`更新失败: ${relativePath} - ${error.message}`);
+                        }
+                    } else {
+                        // 时间戳相同，但检查数据是否真的相同
+                        console.log('文件时间戳相同，检查数据一致性:', relativePath);
+                        try {
+                            const githubContent = atob(githubFile.content);
+                            const githubData = JSON.parse(githubContent);
+                            const localData = localMindmap.data;
+                            
+                            // 简单比较数据是否相同
+                            const localJson = JSON.stringify(localData);
+                            const githubJson = JSON.stringify(githubData);
+                            
+                            if (localJson !== githubJson) {
+                                console.log('数据不一致，使用本地版本更新GitHub:', relativePath);
+                                const folderPath = localMindmap.folderId ? 
+                                    window.mindmapManager.getFolder(localMindmap.folderId).name : '';
+                                await this.saveData(localMindmap.data, localMindmap.fileName, folderPath);
+                                syncResults.updated++;
+                            } else {
+                                console.log('数据一致，无需同步:', relativePath);
+                            }
+                        } catch (error) {
+                            console.error('数据比较失败:', relativePath, error);
+                            syncResults.errors.push(`数据比较失败: ${relativePath} - ${error.message}`);
                         }
                     }
                 }
@@ -2567,6 +2609,24 @@ class GitHubSync {
         // 创建新文件夹
         const newFolder = window.mindmapManager.createFolder(folderName);
         return newFolder.id;
+    }
+    
+    // 从本地存储加载GitHub配置
+    loadFromLocalStorage() {
+        const saved = localStorage.getItem('githubConfig');
+        if (saved) {
+            try {
+                const config = JSON.parse(saved);
+                this.username = config.username;
+                this.repo = config.repo;
+                this.token = config.token;
+                this.isLoggedIn = true;
+                console.log('GitHub登录状态已恢复:', this.username, this.repo);
+            } catch (error) {
+                console.error('恢复GitHub配置失败:', error);
+                this.isLoggedIn = false;
+            }
+        }
     }
 }
 
