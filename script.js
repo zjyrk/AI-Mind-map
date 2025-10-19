@@ -2081,26 +2081,38 @@ document.addEventListener('DOMContentLoaded', () => {
     const githubModalClose = document.getElementById('githubModalClose');
     const cancelGithubBtn = document.getElementById('cancelGithubBtn');
     
-    githubBtn.addEventListener('click', () => {
-        githubModal.style.display = 'flex';
-        
-        // 检查是否已登录
-        if (window.githubSync.loadCredentials()) {
-            showGithubSyncSection();
-        }
-    });
     
-    githubModalClose.addEventListener('click', () => {
-        githubModal.style.display = 'none';
-    });
+    if (githubBtn) {
+        githubBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (githubModal) {
+                githubModal.style.display = 'flex';
+                
+                // 检查是否已登录
+                if (window.githubSync && window.githubSync.loadCredentials()) {
+                    showGithubSyncSection();
+                }
+            }
+        });
+    }
     
-    cancelGithubBtn.addEventListener('click', () => {
-        githubModal.style.display = 'none';
-    });
+    if (githubModalClose) {
+        githubModalClose.addEventListener('click', () => {
+            githubModal.style.display = 'none';
+        });
+    }
+    
+    if (cancelGithubBtn) {
+        cancelGithubBtn.addEventListener('click', () => {
+            githubModal.style.display = 'none';
+        });
+    }
     
     // GitHub登录
     const githubLoginBtn = document.getElementById('githubLoginBtn');
-    githubLoginBtn.addEventListener('click', async () => {
+    if (githubLoginBtn) {
+        githubLoginBtn.addEventListener('click', async () => {
         const username = document.getElementById('githubUsername').value.trim();
         const repo = document.getElementById('githubRepo').value.trim();
         const token = document.getElementById('githubToken').value.trim();
@@ -2126,11 +2138,13 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             showGithubStatus(`登录失败：${result.error}`, 'error');
         }
-    });
+        });
+    }
     
     // 保存到云端
     const githubSaveBtn = document.getElementById('githubSaveBtn');
-    githubSaveBtn.addEventListener('click', async () => {
+    if (githubSaveBtn) {
+        githubSaveBtn.addEventListener('click', async () => {
         showGithubStatus('正在保存...', 'info');
         githubSaveBtn.disabled = true;
         
@@ -2143,11 +2157,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         githubSaveBtn.disabled = false;
-    });
+        });
+    }
     
     // 从云端加载
     const githubLoadBtn = document.getElementById('githubLoadBtn');
-    githubLoadBtn.addEventListener('click', async () => {
+    if (githubLoadBtn) {
+        githubLoadBtn.addEventListener('click', async () => {
         if (!confirm('加载云端数据会覆盖当前内容，是否继续？')) {
             return;
         }
@@ -2164,15 +2180,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         githubLoadBtn.disabled = false;
-    });
+        });
+    }
     
     // 退出登录
     const githubLogoutBtn = document.getElementById('githubLogoutBtn');
-    githubLogoutBtn.addEventListener('click', () => {
+    if (githubLogoutBtn) {
+        githubLogoutBtn.addEventListener('click', () => {
         window.githubSync.logout();
         showGithubLoginSection();
         showGithubStatus('', '');
-    });
+        });
+    }
     
     function showGithubLoginSection() {
         document.getElementById('githubLoginSection').style.display = 'block';
