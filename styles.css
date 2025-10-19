@@ -29,10 +29,10 @@ body {
 }
 
 .sidebar-header {
-    padding: 20px;
+    padding: 12px;
     border-bottom: 1px solid #e0e0e0;
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
 }
 
@@ -42,15 +42,18 @@ body {
 }
 
 .sidebar-header h3 {
-    font-size: 18px;
+    font-size: 14px;
     color: #333;
     font-weight: 600;
     margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .btn-small {
-    padding: 6px 12px;
-    font-size: 12px;
+    padding: 4px 8px;
+    font-size: 11px;
 }
 
 .mindmap-list {
@@ -60,14 +63,26 @@ body {
 }
 
 .mindmap-item {
-    padding: 12px 16px;
-    margin-bottom: 8px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
     background: white;
-    border-radius: 8px;
+    border-radius: 6px;
     border: 1px solid #e0e0e0;
     cursor: pointer;
     transition: all 0.2s ease;
     position: relative;
+    user-select: none;
+}
+
+.mindmap-item.dragging {
+    opacity: 0.5;
+    transform: rotate(5deg);
+}
+
+.mindmap-item.drag-over {
+    border-color: #667eea;
+    background: #f0f4ff;
+    transform: scale(1.02);
 }
 
 .mindmap-item:hover {
@@ -95,10 +110,11 @@ body {
 
 .mindmap-item-meta {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
     font-size: 11px;
     color: #999;
+    margin-top: 2px;
 }
 
 .mindmap-item-actions {
@@ -139,14 +155,21 @@ body {
 
 /* 文件夹样式 */
 .folder-item {
-    padding: 12px 16px;
-    margin-bottom: 8px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
     background: #f8f9fa;
-    border-radius: 8px;
+    border-radius: 6px;
     border: 1px solid #e0e0e0;
     cursor: pointer;
     transition: all 0.2s ease;
     position: relative;
+    user-select: none;
+}
+
+.folder-item.drag-over {
+    border-color: #2196f3;
+    background: #e3f2fd;
+    transform: scale(1.02);
 }
 
 .folder-item:hover {
@@ -180,10 +203,11 @@ body {
 
 .folder-item-meta {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
     font-size: 11px;
     color: #999;
+    margin-top: 2px;
 }
 
 .folder-item-actions {
@@ -228,7 +252,7 @@ body {
 }
 
 .sidebar-footer {
-    padding: 20px;
+    padding: 12px;
     border-top: 1px solid #e0e0e0;
 }
 

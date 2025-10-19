@@ -116,6 +116,20 @@ class MindMap {
             }
         });
         
+        // 供应商切换时自动切换API KEY
+        const apiProviderSelect = document.getElementById('apiProvider');
+        if (apiProviderSelect) {
+            apiProviderSelect.addEventListener('change', () => {
+                const selectedProvider = apiProviderSelect.value;
+                const currentApiKey = this.aiConfig.apiKeys[selectedProvider] || '';
+                document.getElementById('apiKey').value = currentApiKey;
+                
+                // 显示/隐藏自定义URL输入框
+                document.getElementById('customUrlGroup').style.display = 
+                    selectedProvider === 'custom' ? 'block' : 'none';
+            });
+        }
+        
         // 模型选择下拉框
         modelSelect.addEventListener('change', (e) => {
             modelNameInput.value = e.target.value;
@@ -1421,13 +1435,13 @@ class MindMap {
     }
     
     loadAISettingsToForm() {
-        document.getElementById('apiProvider').value = this.aiConfig.provider || 'deepseek';
-        document.getElementById('apiKey').value = this.aiConfig.apiKey || '';
+        document.getElementById('apiProvider').value = this.aiConfig.currentProvider || 'deepseek';
+        document.getElementById('apiKey').value = this.aiConfig.apiKeys[this.aiConfig.currentProvider] || '';
         document.getElementById('customUrl').value = this.aiConfig.customUrl || '';
         document.getElementById('modelName').value = this.aiConfig.modelName || '';
         
         document.getElementById('customUrlGroup').style.display = 
-            this.aiConfig.provider === 'custom' ? 'block' : 'none';
+            this.aiConfig.currentProvider === 'custom' ? 'block' : 'none';
     }
     
     async loadAvailableModels() {
@@ -1483,27 +1497,64 @@ class MindMap {
         }
     }
     
-    saveAISettings() {
+    async saveAISettings() {
         const provider = document.getElementById('apiProvider').value;
         const apiKey = document.getElementById('apiKey').value;
         const customUrl = document.getElementById('customUrl').value;
         const modelName = document.getElementById('modelName').value;
         
-        this.aiConfig = { provider, apiKey, customUrl, modelName };
+        // 保存当前供应商的API KEY
+        this.aiConfig.apiKeys[provider] = apiKey;
+        this.aiConfig.currentProvider = provider;
+        this.aiConfig.customUrl = customUrl;
+        this.aiConfig.modelName = modelName;
+        
         localStorage.setItem('aiConfig', JSON.stringify(this.aiConfig));
         
+        // 如果已登录GitHub，同步AI设置到云端
+        if (window.githubSync && window.githubSync.isLoggedIn) {
+            try {
+                await window.githubSync.syncAISettings(this.aiConfig);
+                alert('AI设置已保存并同步到GitHub！');
+            } catch (error) {
+                console.error('同步AI设置到GitHub失败:', error);
+                alert('AI设置已保存到本地，但同步到GitHub失败：' + error.message);
+            }
+        } else {
+            alert('AI设置已保存到本地');
+        }
+        
         document.getElementById('settingsModal').style.display = 'none';
-        alert('AI设置已保存');
     }
     
     loadAIConfig() {
         const saved = localStorage.getItem('aiConfig');
         if (saved) {
-            return JSON.parse(saved);
+            const config = JSON.parse(saved);
+            // 兼容旧版本配置
+            if (!config.apiKeys) {
+                config.apiKeys = {
+                    deepseek: config.apiKey || '',
+                    openai: '',
+                    gemini: '',
+                    claude: '',
+                    custom: ''
+                };
+                config.currentProvider = config.provider || 'deepseek';
+                config.customUrl = config.customUrl || '';
+                config.modelName = config.modelName || 'deepseek-chat';
+            }
+            return config;
         }
         return {
-            provider: 'deepseek',
-            apiKey: '',
+            currentProvider: 'deepseek',
+            apiKeys: {
+                deepseek: '',
+                openai: '',
+                gemini: '',
+                claude: '',
+                custom: ''
+            },
             customUrl: '',
             modelName: 'deepseek-chat'
         };
@@ -1542,8 +1593,9 @@ class MindMap {
             return;
         }
         
-        if (!this.aiConfig.apiKey) {
-            alert('请先配置AI API设置');
+        const currentApiKey = this.aiConfig.apiKeys[this.aiConfig.currentProvider];
+        if (!currentApiKey) {
+            alert('请先配置当前供应商的API KEY');
             return;
         }
         
@@ -1583,11 +1635,12 @@ class MindMap {
     }
     
     async callAI(prompt) {
-        const { provider, apiKey, customUrl, modelName } = this.aiConfig;
+        const { currentProvider, apiKeys, customUrl, modelName } = this.aiConfig;
+        const apiKey = apiKeys[currentProvider];
         
         let url, headers, body;
         
-        switch (provider) {
+        switch (currentProvider) {
             case 'deepseek':
                 url = 'https://api.deepseek.com/v1/chat/completions';
                 headers = {
@@ -2208,6 +2261,97 @@ class GitHubSync {
         console.log('GitHub文件删除成功:', result);
         return result;
     }
+    
+    // 同步AI设置到GitHub
+    async syncAISettings(aiConfig) {
+        if (!this.isLoggedIn) {
+            throw new Error('请先登录');
+        }
+        
+        const content = JSON.stringify(aiConfig, null, 2);
+        const encodedContent = btoa(unescape(encodeURIComponent(content)));
+        const filePath = 'ai-settings.json';
+        
+        // 首先检查文件是否存在
+        let sha = null;
+        try {
+            const getResponse = await fetch(
+                `https://api.github.com/repos/${this.username}/${this.repo}/contents/${filePath}`,
+                {
+                    headers: {
+                        'Authorization': `token ${this.token}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                }
+            );
+            
+            if (getResponse.ok) {
+                const fileData = await getResponse.json();
+                sha = fileData.sha;
+            }
+        } catch (error) {
+            console.log('AI设置文件不存在，将创建新文件');
+        }
+        
+        // 创建或更新文件
+        const response = await fetch(
+            `https://api.github.com/repos/${this.username}/${this.repo}/contents/${filePath}`,
+            {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message: sha ? '更新AI设置' : '添加AI设置',
+                    content: encodedContent,
+                    sha: sha
+                })
+            }
+        );
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`同步AI设置失败: ${response.status} - ${errorData.message || '未知错误'}`);
+        }
+        
+        return await response.json();
+    }
+    
+    // 从GitHub加载AI设置
+    async loadAISettings() {
+        if (!this.isLoggedIn) {
+            throw new Error('请先登录');
+        }
+        
+        const filePath = 'ai-settings.json';
+        
+        try {
+            const response = await fetch(
+                `https://api.github.com/repos/${this.username}/${this.repo}/contents/${filePath}`,
+                {
+                    headers: {
+                        'Authorization': `token ${this.token}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                }
+            );
+            
+            if (response.ok) {
+                const fileData = await response.json();
+                const content = atob(fileData.content);
+                return JSON.parse(content);
+            } else if (response.status === 404) {
+                return null; // 文件不存在
+            } else {
+                throw new Error(`加载AI设置失败: ${response.status}`);
+            }
+        } catch (error) {
+            console.error('加载AI设置失败:', error);
+            throw error;
+        }
+    }
 }
 
 // 思维导图管理类
@@ -2483,6 +2627,29 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (result.success) {
             showGithubStatus('登录成功！', 'success');
+            
+            // 尝试从GitHub加载AI设置
+            try {
+                const cloudAIConfig = await window.githubSync.loadAISettings();
+                if (cloudAIConfig) {
+                    // 合并云端和本地设置，云端优先
+                    const localConfig = window.mindMap.aiConfig;
+                    window.mindMap.aiConfig = {
+                        ...localConfig,
+                        ...cloudAIConfig,
+                        // 保持本地的API Keys，但使用云端的其他设置
+                        apiKeys: {
+                            ...localConfig.apiKeys,
+                            ...cloudAIConfig.apiKeys
+                        }
+                    };
+                    localStorage.setItem('aiConfig', JSON.stringify(window.mindMap.aiConfig));
+                    console.log('已从GitHub加载AI设置');
+                }
+            } catch (error) {
+                console.log('从GitHub加载AI设置失败:', error.message);
+            }
+            
             setTimeout(() => {
                 showGithubSyncSection();
                 document.getElementById('githubUserDisplay').textContent = `${username}/${repo}`;
@@ -2763,9 +2930,34 @@ function updateMindmapList() {
     
     // 创建新的事件处理函数
     const clickHandler = (e) => {
+        console.log('点击事件:', e.target, e.target.className);
+        
+        // 处理操作按钮 - 优先处理
+        const actionBtn = e.target.closest('.mindmap-item-action');
+        if (actionBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const action = actionBtn.dataset.action;
+            const id = parseInt(actionBtn.dataset.id);
+            
+            console.log('操作按钮点击:', action, id);
+            
+            if (action === 'edit') {
+                editMindmap(id);
+            } else if (action === 'delete') {
+                deleteMindmap(id);
+            } else if (action === 'edit-folder') {
+                editFolder(id);
+            } else if (action === 'delete-folder') {
+                deleteFolder(id);
+            }
+            return;
+        }
+        
         // 处理内联编辑输入框
         if (e.target.classList.contains('inline-edit')) {
-            handleInlineEdit(e.target);
+            setupInlineEdit(e.target);
             return;
         }
         
@@ -2781,32 +2973,21 @@ function updateMindmapList() {
         const folderItem = e.target.closest('.folder-item');
         if (folderItem && folderItem.dataset.folderId) {
             const id = parseInt(folderItem.dataset.folderId);
-            window.mindmapManager.toggleFolder(id);
-            updateMindmapList();
-            return;
-        }
-        
-        // 处理操作按钮
-        const actionBtn = e.target.closest('.mindmap-item-action');
-        if (actionBtn) {
-            const action = actionBtn.dataset.action;
-            const id = parseInt(actionBtn.dataset.id);
-            
-            if (action === 'edit') {
-                editMindmap(id);
-            } else if (action === 'delete') {
-                deleteMindmap(id);
-            } else if (action === 'edit-folder') {
-                editFolder(id);
-            } else if (action === 'delete-folder') {
-                deleteFolder(id);
+            // 双击进入文件夹（展开/折叠）
+            if (e.detail === 2) {
+                window.mindmapManager.toggleFolder(id);
+                updateMindmapList();
             }
+            return;
         }
     };
     
     // 添加新的事件监听器
     mindmapList.addEventListener('click', clickHandler);
     mindmapList._clickHandler = clickHandler;
+    
+    // 添加拖拽事件监听器
+    setupDragAndDrop();
 }
 
 // 渲染思维导图项目
@@ -2825,16 +3006,13 @@ function renderMindmapItem(mindmap) {
     }
     
     return `
-        <div class="mindmap-item ${isActive ? 'active' : ''}" data-id="${mindmap.id}">
+        <div class="mindmap-item ${isActive ? 'active' : ''}" data-id="${mindmap.id}" 
+             draggable="true" data-type="mindmap">
             <div class="mindmap-item-actions">
                 <button class="mindmap-item-action edit" title="编辑" data-action="edit" data-id="${mindmap.id}">✏️</button>
                 <button class="mindmap-item-action delete" title="删除" data-action="delete" data-id="${mindmap.id}">🗑️</button>
             </div>
             <div class="mindmap-item-name">${mindmap.name}</div>
-            <div class="mindmap-item-meta">
-                <span>${new Date(mindmap.updatedAt).toLocaleDateString()}</span>
-                <span>${mindmap.data ? '已保存' : '未保存'}</span>
-            </div>
         </div>
     `;
 }
@@ -2854,16 +3032,13 @@ function renderFolderItem(folder) {
     }
     
     let html = `
-        <div class="folder-item ${folder.expanded ? 'expanded' : ''}" data-folder-id="${folder.id}">
+        <div class="folder-item ${folder.expanded ? 'expanded' : ''}" data-folder-id="${folder.id}" 
+             data-type="folder" data-folder-id="${folder.id}">
             <div class="folder-item-actions">
                 <button class="mindmap-item-action edit" title="编辑" data-action="edit-folder" data-id="${folder.id}">✏️</button>
                 <button class="mindmap-item-action delete" title="删除" data-action="delete-folder" data-id="${folder.id}">🗑️</button>
             </div>
             <div class="folder-item-name">${folder.name}</div>
-            <div class="folder-item-meta">
-                <span>${new Date(folder.updatedAt).toLocaleDateString()}</span>
-                <span>${mindmapsInFolder.length} 个项目</span>
-            </div>
         </div>
     `;
     
@@ -2939,6 +3114,8 @@ async function selectMindmap(id) {
 
 // 删除思维导图
 async function deleteMindmap(id) {
+    console.log('deleteMindmap called with id:', id);
+    
     // 防止重复调用
     if (window._deletingMindmap) {
         console.log('删除操作正在进行中，请稍候...');
@@ -2946,7 +3123,10 @@ async function deleteMindmap(id) {
     }
     
     const mindmap = window.mindmapManager.getMindmap(id);
-    if (!mindmap) return;
+    if (!mindmap) {
+        console.log('mindmap not found for id:', id);
+        return;
+    }
     
     // 显示详细信息用于调试
     console.log('准备删除的思维导图信息:', {
@@ -3020,20 +3200,38 @@ async function deleteMindmap(id) {
 
 // 编辑思维导图
 function editMindmap(id) {
+    console.log('editMindmap called with id:', id);
     const mindmap = window.mindmapManager.getMindmap(id);
-    if (!mindmap) return;
+    if (!mindmap) {
+        console.log('mindmap not found for id:', id);
+        return;
+    }
     
-    // 填充编辑表单
-    document.getElementById('editMindmapName').value = mindmap.name;
-    document.getElementById('editMindmapDescription').value = mindmap.description || '';
-    document.getElementById('editMindmapModal').dataset.mindmapId = id;
+    console.log('setting mindmap to editing mode:', mindmap.name);
+    // 设置编辑状态
+    mindmap.isEditing = true;
+    window.mindmapManager.saveToLocalStorage();
+    updateMindmapList();
     
-    // 显示编辑模态框
-    document.getElementById('editMindmapModal').style.display = 'flex';
+    // 进入编辑状态
+    setTimeout(() => {
+        const input = document.querySelector(`[data-id="${id}"] .inline-edit`);
+        if (input) {
+            console.log('found input element, setting up edit');
+            input.focus();
+            input.select();
+        } else {
+            console.log('input element not found for id:', id);
+        }
+    }, 100);
 }
 
-// 处理内联编辑
-function handleInlineEdit(input) {
+// 设置内联编辑
+function setupInlineEdit(input) {
+    // 避免重复绑定事件
+    if (input._editSetup) return;
+    input._editSetup = true;
+    
     input.addEventListener('blur', () => {
         const id = parseInt(input.dataset.id);
         const type = input.dataset.type;
@@ -3057,6 +3255,19 @@ function handleInlineEdit(input) {
                     window.mindmapManager.saveToLocalStorage();
                 }
             }
+        } else {
+            // 如果名称为空，取消编辑状态
+            if (type === 'mindmap') {
+                const mindmap = window.mindmapManager.getMindmap(id);
+                if (mindmap) {
+                    mindmap.isEditing = false;
+                }
+            } else if (type === 'folder') {
+                const folder = window.mindmapManager.getFolder(id);
+                if (folder) {
+                    folder.isEditing = false;
+                }
+            }
         }
         
         updateMindmapList();
@@ -3064,8 +3275,10 @@ function handleInlineEdit(input) {
     
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
+            e.preventDefault();
             input.blur();
         } else if (e.key === 'Escape') {
+            e.preventDefault();
             const id = parseInt(input.dataset.id);
             const type = input.dataset.type;
             
@@ -3133,6 +3346,99 @@ async function deleteFolder(id) {
     } catch (error) {
         alert(`删除失败：${error.message}`);
     }
+}
+
+// 设置拖拽功能
+function setupDragAndDrop() {
+    const mindmapList = document.getElementById('mindmapList');
+    if (!mindmapList) return;
+    
+    let draggedElement = null;
+    let draggedMindmapId = null;
+    
+    // 拖拽开始
+    mindmapList.addEventListener('dragstart', (e) => {
+        const mindmapItem = e.target.closest('.mindmap-item[data-type="mindmap"]');
+        if (mindmapItem) {
+            draggedElement = mindmapItem;
+            draggedMindmapId = parseInt(mindmapItem.dataset.id);
+            mindmapItem.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', draggedMindmapId.toString());
+        }
+    });
+    
+    // 拖拽结束
+    mindmapList.addEventListener('dragend', (e) => {
+        if (draggedElement) {
+            draggedElement.classList.remove('dragging');
+            draggedElement = null;
+            draggedMindmapId = null;
+        }
+        
+        // 清除所有拖拽样式
+        document.querySelectorAll('.drag-over').forEach(el => {
+            el.classList.remove('drag-over');
+        });
+    });
+    
+    // 拖拽进入
+    mindmapList.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        const folderItem = e.target.closest('.folder-item[data-type="folder"]');
+        if (folderItem && draggedMindmapId) {
+            folderItem.classList.add('drag-over');
+        }
+    });
+    
+    // 拖拽离开
+    mindmapList.addEventListener('dragleave', (e) => {
+        const folderItem = e.target.closest('.folder-item[data-type="folder"]');
+        if (folderItem) {
+            folderItem.classList.remove('drag-over');
+        }
+    });
+    
+    // 拖拽悬停
+    mindmapList.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    });
+    
+    // 放置
+    mindmapList.addEventListener('drop', (e) => {
+        e.preventDefault();
+        
+        const folderItem = e.target.closest('.folder-item[data-type="folder"]');
+        if (folderItem && draggedMindmapId) {
+            const folderId = parseInt(folderItem.dataset.folderId);
+            const mindmap = window.mindmapManager.getMindmap(draggedMindmapId);
+            
+            if (mindmap) {
+                // 更新思维导图的文件夹ID
+                mindmap.folderId = folderId;
+                mindmap.updatedAt = new Date().toISOString();
+                window.mindmapManager.saveToLocalStorage();
+                
+                // 确保文件夹是展开的
+                const folder = window.mindmapManager.getFolder(folderId);
+                if (folder && !folder.expanded) {
+                    folder.expanded = true;
+                    window.mindmapManager.saveToLocalStorage();
+                }
+                
+                // 更新列表显示
+                updateMindmapList();
+                
+                console.log(`思维导图"${mindmap.name}"已移动到文件夹"${folder.name}"`);
+            }
+        }
+        
+        // 清除拖拽样式
+        document.querySelectorAll('.drag-over').forEach(el => {
+            el.classList.remove('drag-over');
+        });
+    });
 }
 
 // 自动保存当前思维导图数据
