@@ -225,6 +225,12 @@ class MindMap {
         }
         
         this.updateUndoRedoButtons();
+        
+        // 自动保存到当前思维导图
+        if (window.mindmapManager && window.mindmapManager.currentMindmap) {
+            window.mindmapManager.updateMindmapData(window.mindmapManager.currentMindmap.id, state);
+            updateMindmapList();
+        }
     }
     
     serializeState() {
@@ -1921,7 +1927,7 @@ class GitHubSync {
         this.repo = null;
         this.token = null;
         this.isLoggedIn = false;
-        this.fileName = 'mindmap-data.json';
+        this.folderName = 'mindmaps'; // 思维导图文件夹
     }
     
     async login(username, repo, token) {
@@ -2008,19 +2014,20 @@ class GitHubSync {
         return false;
     }
     
-    async saveData(data) {
+    async saveData(data, fileName) {
         if (!this.isLoggedIn) {
             throw new Error('请先登录');
         }
         
         const content = JSON.stringify(data, null, 2);
         const encodedContent = btoa(unescape(encodeURIComponent(content)));
+        const filePath = `${this.folderName}/${fileName}`;
         
         // 首先检查文件是否存在
         let sha = null;
         try {
             const getResponse = await fetch(
-                `https://api.github.com/repos/${this.username}/${this.repo}/contents/${this.fileName}`,
+                `https://api.github.com/repos/${this.username}/${this.repo}/contents/${filePath}`,
                 {
                     headers: {
                         'Authorization': `token ${this.token}`,
@@ -2039,7 +2046,7 @@ class GitHubSync {
         
         // 创建或更新文件
         const body = {
-            message: `Update mindmap - ${new Date().toLocaleString('zh-CN')}`,
+            message: `Update mindmap ${fileName} - ${new Date().toLocaleString('zh-CN')}`,
             content: encodedContent
         };
         
@@ -2048,7 +2055,7 @@ class GitHubSync {
         }
         
         const response = await fetch(
-            `https://api.github.com/repos/${this.username}/${this.repo}/contents/${this.fileName}`,
+            `https://api.github.com/repos/${this.username}/${this.repo}/contents/${filePath}`,
             {
                 method: 'PUT',
                 headers: {
@@ -2080,13 +2087,14 @@ class GitHubSync {
         return await response.json();
     }
     
-    async loadData() {
+    async loadData(fileName) {
         if (!this.isLoggedIn) {
             throw new Error('请先登录');
         }
         
+        const filePath = `${this.folderName}/${fileName}`;
         const response = await fetch(
-            `https://api.github.com/repos/${this.username}/${this.repo}/contents/${this.fileName}`,
+            `https://api.github.com/repos/${this.username}/${this.repo}/contents/${filePath}`,
             {
                 headers: {
                     'Authorization': `token ${this.token}`,
@@ -2113,12 +2121,230 @@ class GitHubSync {
         const content = decodeURIComponent(escape(atob(fileData.content)));
         return JSON.parse(content);
     }
+    
+    // 获取所有思维导图文件列表
+    async getAllMindmaps() {
+        if (!this.isLoggedIn) {
+            throw new Error('请先登录');
+        }
+        
+        const response = await fetch(
+            `https://api.github.com/repos/${this.username}/${this.repo}/contents/${this.folderName}`,
+            {
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            }
+        );
+        
+        if (!response.ok) {
+            if (response.status === 404) {
+                // 文件夹不存在，返回空数组
+                return [];
+            }
+            throw new Error('获取文件列表失败');
+        }
+        
+        const files = await response.json();
+        return files.filter(file => file.type === 'file' && file.name.endsWith('.json'));
+    }
+    
+    // 删除思维导图文件
+    async deleteMindmap(fileName) {
+        if (!this.isLoggedIn) {
+            throw new Error('请先登录');
+        }
+        
+        const filePath = `${this.folderName}/${fileName}`;
+        
+        // 首先获取文件的SHA
+        const getResponse = await fetch(
+            `https://api.github.com/repos/${this.username}/${this.repo}/contents/${filePath}`,
+            {
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            }
+        );
+        
+        if (!getResponse.ok) {
+            throw new Error('文件不存在');
+        }
+        
+        const fileData = await getResponse.json();
+        
+        // 删除文件
+        const response = await fetch(
+            `https://api.github.com/repos/${this.username}/${this.repo}/contents/${filePath}`,
+            {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/vnd.github.v3+json'
+                },
+                body: JSON.stringify({
+                    message: `Delete mindmap ${fileName}`,
+                    sha: fileData.sha
+                })
+            }
+        );
+        
+        if (!response.ok) {
+            throw new Error('删除失败');
+        }
+        
+        return await response.json();
+    }
+}
+
+// 思维导图管理类
+class MindmapManager {
+    constructor() {
+        this.mindmaps = new Map(); // 存储所有思维导图
+        this.currentMindmap = null; // 当前选中的思维导图
+        this.nextId = 1;
+    }
+    
+    // 创建新的思维导图
+    createMindmap(name, description = '') {
+        const id = this.nextId++;
+        const mindmap = {
+            id: id,
+            name: name,
+            description: description,
+            fileName: `${name.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}_${id}.json`,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            data: null // 思维导图数据
+        };
+        
+        this.mindmaps.set(id, mindmap);
+        this.saveToLocalStorage();
+        return mindmap;
+    }
+    
+    // 删除思维导图
+    deleteMindmap(id) {
+        if (this.mindmaps.has(id)) {
+            this.mindmaps.delete(id);
+            if (this.currentMindmap && this.currentMindmap.id === id) {
+                this.currentMindmap = null;
+            }
+            this.saveToLocalStorage();
+            return true;
+        }
+        return false;
+    }
+    
+    // 获取思维导图
+    getMindmap(id) {
+        return this.mindmaps.get(id);
+    }
+    
+    // 获取所有思维导图
+    getAllMindmaps() {
+        return Array.from(this.mindmaps.values());
+    }
+    
+    // 设置当前思维导图
+    setCurrentMindmap(id) {
+        const mindmap = this.mindmaps.get(id);
+        if (mindmap) {
+            this.currentMindmap = mindmap;
+            return true;
+        }
+        return false;
+    }
+    
+    // 更新思维导图数据
+    updateMindmapData(id, data) {
+        const mindmap = this.mindmaps.get(id);
+        if (mindmap) {
+            mindmap.data = data;
+            mindmap.updatedAt = new Date().toISOString();
+            this.saveToLocalStorage();
+            return true;
+        }
+        return false;
+    }
+    
+    // 从本地存储加载
+    loadFromLocalStorage() {
+        const saved = localStorage.getItem('mindmapManager');
+        if (saved) {
+            const data = JSON.parse(saved);
+            this.mindmaps = new Map(data.mindmaps);
+            this.nextId = data.nextId || 1;
+            
+            // 恢复当前思维导图
+            if (data.currentMindmapId) {
+                this.currentMindmap = this.mindmaps.get(data.currentMindmapId);
+            }
+        }
+    }
+    
+    // 保存到本地存储
+    saveToLocalStorage() {
+        const data = {
+            mindmaps: Array.from(this.mindmaps.entries()),
+            nextId: this.nextId,
+            currentMindmapId: this.currentMindmap ? this.currentMindmap.id : null
+        };
+        localStorage.setItem('mindmapManager', JSON.stringify(data));
+    }
+    
+    // 从GitHub同步加载思维导图列表
+    async syncFromGitHub() {
+        if (!window.githubSync || !window.githubSync.isLoggedIn) {
+            throw new Error('请先登录GitHub');
+        }
+        
+        try {
+            const files = await window.githubSync.getAllMindmaps();
+            const newMindmaps = new Map();
+            
+            for (const file of files) {
+                // 从文件名解析思维导图信息
+                const fileName = file.name;
+                const name = fileName.replace('.json', '').replace(/_\d+$/, '');
+                const id = this.nextId++;
+                
+                const mindmap = {
+                    id: id,
+                    name: name,
+                    description: '',
+                    fileName: fileName,
+                    createdAt: file.created_at,
+                    updatedAt: file.updated_at,
+                    data: null
+                };
+                
+                newMindmaps.set(id, mindmap);
+            }
+            
+            this.mindmaps = newMindmaps;
+            this.saveToLocalStorage();
+            return files.length;
+        } catch (error) {
+            throw new Error(`同步失败: ${error.message}`);
+        }
+    }
 }
 
 // 初始化应用
 document.addEventListener('DOMContentLoaded', () => {
     window.mindMap = new MindMap();
     window.githubSync = new GitHubSync();
+    window.mindmapManager = new MindmapManager();
+    
+    // 加载本地数据
+    window.mindmapManager.loadFromLocalStorage();
+    
+    // 初始化UI
+    updateMindmapList();
     
     // GitHub按钮事件
     const githubBtn = document.getElementById('githubBtn');
@@ -2194,8 +2420,13 @@ document.addEventListener('DOMContentLoaded', () => {
         githubSaveBtn.disabled = true;
         
         try {
+            if (!window.mindmapManager.currentMindmap) {
+                showGithubStatus('❌ 请先选择一个思维导图', 'error');
+                return;
+            }
+            
             const state = window.mindMap.serializeState();
-            await window.githubSync.saveData(state);
+            await window.githubSync.saveData(state, window.mindmapManager.currentMindmap.fileName);
             showGithubStatus('✅ 保存成功！', 'success');
         } catch (error) {
             showGithubStatus(`❌ 保存失败：${error.message}`, 'error');
@@ -2209,19 +2440,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const githubLoadBtn = document.getElementById('githubLoadBtn');
     if (githubLoadBtn) {
         githubLoadBtn.addEventListener('click', async () => {
-        if (!confirm('加载云端数据会覆盖当前内容，是否继续？')) {
-            return;
-        }
-        
-        showGithubStatus('正在加载...', 'info');
+        showGithubStatus('正在同步云端数据...', 'info');
         githubLoadBtn.disabled = true;
         
         try {
-            const data = await window.githubSync.loadData();
-            window.mindMap.restoreState(data);
-            showGithubStatus('✅ 加载成功！', 'success');
+            // 从GitHub同步思维导图列表
+            const count = await window.mindmapManager.syncFromGitHub();
+            updateMindmapList();
+            showGithubStatus(`✅ 同步成功！发现 ${count} 个思维导图`, 'success');
         } catch (error) {
-            showGithubStatus(`❌ 加载失败：${error.message}`, 'error');
+            showGithubStatus(`❌ 同步失败：${error.message}`, 'error');
         }
         
         githubLoadBtn.disabled = false;
@@ -2263,4 +2491,209 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         statusDiv.style.display = message ? 'block' : 'none';
     }
+    
+    // 思维导图管理相关事件
+    setupMindmapManagerEvents();
 });
+
+// 设置思维导图管理相关事件
+function setupMindmapManagerEvents() {
+    // 新建思维导图按钮
+    const newMindmapBtn = document.getElementById('newMindmapBtn');
+    if (newMindmapBtn) {
+        newMindmapBtn.addEventListener('click', () => {
+            document.getElementById('newMindmapModal').style.display = 'flex';
+        });
+    }
+    
+    // 新建思维导图模态框关闭
+    const newMindmapModalClose = document.getElementById('newMindmapModalClose');
+    const cancelNewMindmapBtn = document.getElementById('cancelNewMindmapBtn');
+    if (newMindmapModalClose) {
+        newMindmapModalClose.addEventListener('click', () => {
+            document.getElementById('newMindmapModal').style.display = 'none';
+        });
+    }
+    if (cancelNewMindmapBtn) {
+        cancelNewMindmapBtn.addEventListener('click', () => {
+            document.getElementById('newMindmapModal').style.display = 'none';
+        });
+    }
+    
+    // 创建思维导图按钮
+    const createMindmapBtn = document.getElementById('createMindmapBtn');
+    if (createMindmapBtn) {
+        createMindmapBtn.addEventListener('click', () => {
+            const name = document.getElementById('mindmapName').value.trim();
+            const description = document.getElementById('mindmapDescription').value.trim();
+            
+            if (!name) {
+                alert('请输入思维导图名称');
+                return;
+            }
+            
+            const mindmap = window.mindmapManager.createMindmap(name, description);
+            updateMindmapList();
+            selectMindmap(mindmap.id);
+            
+            document.getElementById('newMindmapModal').style.display = 'none';
+            document.getElementById('mindmapName').value = '';
+            document.getElementById('mindmapDescription').value = '';
+        });
+    }
+    
+    // 同步全部按钮
+    const syncAllBtn = document.getElementById('syncAllBtn');
+    if (syncAllBtn) {
+        syncAllBtn.addEventListener('click', async () => {
+            if (!window.githubSync.isLoggedIn) {
+                alert('请先登录GitHub');
+                return;
+            }
+            
+            syncAllBtn.disabled = true;
+            syncAllBtn.textContent = '🔄 同步中...';
+            
+            try {
+                // 同步所有思维导图到GitHub
+                const mindmaps = window.mindmapManager.getAllMindmaps();
+                let successCount = 0;
+                
+                for (const mindmap of mindmaps) {
+                    if (mindmap.data) {
+                        await window.githubSync.saveData(mindmap.data, mindmap.fileName);
+                        successCount++;
+                    }
+                }
+                
+                alert(`同步完成！成功同步 ${successCount} 个思维导图`);
+            } catch (error) {
+                alert(`同步失败：${error.message}`);
+            }
+            
+            syncAllBtn.disabled = false;
+            syncAllBtn.textContent = '☁️ 同步全部';
+        });
+    }
+}
+
+// 更新思维导图列表
+function updateMindmapList() {
+    const mindmapList = document.getElementById('mindmapList');
+    if (!mindmapList) return;
+    
+    const mindmaps = window.mindmapManager.getAllMindmaps();
+    
+    if (mindmaps.length === 0) {
+        mindmapList.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">暂无思维导图<br>点击"新建"创建第一个</div>';
+        return;
+    }
+    
+    mindmapList.innerHTML = mindmaps.map(mindmap => {
+        const isActive = window.mindmapManager.currentMindmap && 
+                        window.mindmapManager.currentMindmap.id === mindmap.id;
+        
+        return `
+            <div class="mindmap-item ${isActive ? 'active' : ''}" data-id="${mindmap.id}">
+                <div class="mindmap-item-actions">
+                    <button class="mindmap-item-action delete" title="删除" data-action="delete" data-id="${mindmap.id}">🗑️</button>
+                </div>
+                <div class="mindmap-item-name">${mindmap.name}</div>
+                <div class="mindmap-item-description">${mindmap.description || '无描述'}</div>
+                <div class="mindmap-item-meta">
+                    <span>${new Date(mindmap.updatedAt).toLocaleDateString()}</span>
+                    <span>${mindmap.data ? '已保存' : '未保存'}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // 添加点击事件
+    mindmapList.addEventListener('click', (e) => {
+        const mindmapItem = e.target.closest('.mindmap-item');
+        if (mindmapItem) {
+            const id = parseInt(mindmapItem.dataset.id);
+            selectMindmap(id);
+        }
+        
+        const actionBtn = e.target.closest('.mindmap-item-action');
+        if (actionBtn) {
+            const action = actionBtn.dataset.action;
+            const id = parseInt(actionBtn.dataset.id);
+            
+            if (action === 'delete') {
+                deleteMindmap(id);
+            }
+        }
+    });
+}
+
+// 选择思维导图
+async function selectMindmap(id) {
+    const mindmap = window.mindmapManager.getMindmap(id);
+    if (!mindmap) return;
+    
+    window.mindmapManager.setCurrentMindmap(id);
+    updateMindmapList();
+    
+    // 加载思维导图数据
+    if (mindmap.data) {
+        window.mindMap.restoreState(mindmap.data);
+    } else {
+        // 如果本地没有数据，尝试从GitHub加载
+        if (window.githubSync.isLoggedIn && mindmap.fileName) {
+            try {
+                const data = await window.githubSync.loadData(mindmap.fileName);
+                window.mindMap.restoreState(data);
+                // 保存到本地
+                window.mindmapManager.updateMindmapData(id, data);
+                updateMindmapList();
+            } catch (error) {
+                console.warn('从GitHub加载失败，创建新的思维导图:', error);
+                window.mindMap = new MindMap();
+            }
+        } else {
+            // 创建新的思维导图
+            window.mindMap = new MindMap();
+        }
+    }
+}
+
+// 删除思维导图
+async function deleteMindmap(id) {
+    const mindmap = window.mindmapManager.getMindmap(id);
+    if (!mindmap) return;
+    
+    if (!confirm(`确定要删除思维导图"${mindmap.name}"吗？`)) {
+        return;
+    }
+    
+    try {
+        // 如果已登录GitHub，同时删除云端文件
+        if (window.githubSync.isLoggedIn && mindmap.fileName) {
+            await window.githubSync.deleteMindmap(mindmap.fileName);
+        }
+        
+        // 删除本地数据
+        window.mindmapManager.deleteMindmap(id);
+        updateMindmapList();
+        
+        // 如果删除的是当前思维导图，创建新的
+        if (!window.mindmapManager.currentMindmap) {
+            window.mindMap = new MindMap();
+        }
+        
+        alert('删除成功');
+    } catch (error) {
+        alert(`删除失败：${error.message}`);
+    }
+}
+
+// 自动保存当前思维导图数据
+function autoSaveCurrentMindmap() {
+    if (window.mindmapManager.currentMindmap) {
+        const data = window.mindMap.serializeState();
+        window.mindmapManager.updateMindmapData(window.mindmapManager.currentMindmap.id, data);
+        updateMindmapList();
+    }
+}
