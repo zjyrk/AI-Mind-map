@@ -174,6 +174,30 @@
             </div>
         </div>
 
+        <!-- 编辑思维导图模态框 -->
+        <div id="editMindmapModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>✏️ 编辑思维导图</h2>
+                    <span class="close" id="editMindmapModalClose">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="editMindmapName">思维导图名称：</label>
+                        <input type="text" id="editMindmapName" class="form-control" placeholder="输入思维导图名称">
+                    </div>
+                    <div class="form-group">
+                        <label for="editMindmapDescription">描述（可选）：</label>
+                        <textarea id="editMindmapDescription" class="form-control" rows="3" placeholder="输入思维导图描述"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="saveMindmapBtn" class="btn btn-primary">保存</button>
+                    <button id="cancelEditMindmapBtn" class="btn btn-secondary">取消</button>
+                </div>
+            </div>
+        </div>
+
         <!-- AI扩展模态框 -->
         <div id="aiExpandModal" class="modal" style="display: none;">
             <div class="modal-content">

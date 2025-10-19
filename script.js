@@ -226,8 +226,8 @@ class MindMap {
         
         this.updateUndoRedoButtons();
         
-        // 自动保存到当前思维导图
-        if (window.mindmapManager && window.mindmapManager.currentMindmap) {
+        // 自动保存到当前思维导图（避免在切换时重复保存）
+        if (window.mindmapManager && window.mindmapManager.currentMindmap && !this._isSwitching) {
             window.mindmapManager.updateMindmapData(window.mindmapManager.currentMindmap.id, state);
             updateMindmapList();
         }
@@ -2575,6 +2575,46 @@ function setupMindmapManagerEvents() {
             syncAllBtn.textContent = '☁️ 同步全部';
         });
     }
+    
+    // 编辑思维导图模态框事件
+    const editMindmapModalClose = document.getElementById('editMindmapModalClose');
+    const cancelEditMindmapBtn = document.getElementById('cancelEditMindmapBtn');
+    if (editMindmapModalClose) {
+        editMindmapModalClose.addEventListener('click', () => {
+            document.getElementById('editMindmapModal').style.display = 'none';
+        });
+    }
+    if (cancelEditMindmapBtn) {
+        cancelEditMindmapBtn.addEventListener('click', () => {
+            document.getElementById('editMindmapModal').style.display = 'none';
+        });
+    }
+    
+    // 保存编辑按钮
+    const saveMindmapBtn = document.getElementById('saveMindmapBtn');
+    if (saveMindmapBtn) {
+        saveMindmapBtn.addEventListener('click', () => {
+            const name = document.getElementById('editMindmapName').value.trim();
+            const description = document.getElementById('editMindmapDescription').value.trim();
+            const mindmapId = parseInt(document.getElementById('editMindmapModal').dataset.mindmapId);
+            
+            if (!name) {
+                alert('请输入思维导图名称');
+                return;
+            }
+            
+            const mindmap = window.mindmapManager.getMindmap(mindmapId);
+            if (mindmap) {
+                mindmap.name = name;
+                mindmap.description = description;
+                mindmap.updatedAt = new Date().toISOString();
+                window.mindmapManager.saveToLocalStorage();
+                updateMindmapList();
+            }
+            
+            document.getElementById('editMindmapModal').style.display = 'none';
+        });
+    }
 }
 
 // 更新思维导图列表
@@ -2596,6 +2636,7 @@ function updateMindmapList() {
         return `
             <div class="mindmap-item ${isActive ? 'active' : ''}" data-id="${mindmap.id}">
                 <div class="mindmap-item-actions">
+                    <button class="mindmap-item-action edit" title="编辑" data-action="edit" data-id="${mindmap.id}">✏️</button>
                     <button class="mindmap-item-action delete" title="删除" data-action="delete" data-id="${mindmap.id}">🗑️</button>
                 </div>
                 <div class="mindmap-item-name">${mindmap.name}</div>
@@ -2621,7 +2662,9 @@ function updateMindmapList() {
             const action = actionBtn.dataset.action;
             const id = parseInt(actionBtn.dataset.id);
             
-            if (action === 'delete') {
+            if (action === 'edit') {
+                editMindmap(id);
+            } else if (action === 'delete') {
                 deleteMindmap(id);
             }
         }
@@ -2632,6 +2675,20 @@ function updateMindmapList() {
 async function selectMindmap(id) {
     const mindmap = window.mindmapManager.getMindmap(id);
     if (!mindmap) return;
+    
+    // 如果已经是当前思维导图，直接返回
+    if (window.mindmapManager.currentMindmap && window.mindmapManager.currentMindmap.id === id) {
+        return;
+    }
+    
+    // 设置切换标志，避免重复保存
+    window.mindMap._isSwitching = true;
+    
+    // 先保存当前思维导图的数据
+    if (window.mindmapManager.currentMindmap) {
+        const currentData = window.mindMap.serializeState();
+        window.mindmapManager.updateMindmapData(window.mindmapManager.currentMindmap.id, currentData);
+    }
     
     window.mindmapManager.setCurrentMindmap(id);
     updateMindmapList();
@@ -2650,13 +2707,27 @@ async function selectMindmap(id) {
                 updateMindmapList();
             } catch (error) {
                 console.warn('从GitHub加载失败，创建新的思维导图:', error);
-                window.mindMap = new MindMap();
+                // 不要重新创建MindMap实例，而是清空当前数据
+                window.mindMap.nodes.clear();
+                window.mindMap.rootNode = null;
+                window.mindMap.selectedNode = null;
+                window.mindMap.nextId = 1;
+                window.mindMap.createRootNode();
+                window.mindMap.render();
             }
         } else {
-            // 创建新的思维导图
-            window.mindMap = new MindMap();
+            // 不要重新创建MindMap实例，而是清空当前数据
+            window.mindMap.nodes.clear();
+            window.mindMap.rootNode = null;
+            window.mindMap.selectedNode = null;
+            window.mindMap.nextId = 1;
+            window.mindMap.createRootNode();
+            window.mindMap.render();
         }
     }
+    
+    // 清除切换标志
+    window.mindMap._isSwitching = false;
 }
 
 // 删除思维导图
@@ -2687,6 +2758,20 @@ async function deleteMindmap(id) {
     } catch (error) {
         alert(`删除失败：${error.message}`);
     }
+}
+
+// 编辑思维导图
+function editMindmap(id) {
+    const mindmap = window.mindmapManager.getMindmap(id);
+    if (!mindmap) return;
+    
+    // 填充编辑表单
+    document.getElementById('editMindmapName').value = mindmap.name;
+    document.getElementById('editMindmapDescription').value = mindmap.description || '';
+    document.getElementById('editMindmapModal').dataset.mindmapId = id;
+    
+    // 显示编辑模态框
+    document.getElementById('editMindmapModal').style.display = 'flex';
 }
 
 // 自动保存当前思维导图数据
