@@ -2353,6 +2353,221 @@ class GitHubSync {
             throw error;
         }
     }
+    
+    // 获取GitHub上所有思维导图文件的详细信息
+    async getAllMindmapFiles() {
+        if (!this.isLoggedIn) {
+            throw new Error('请先登录');
+        }
+        
+        try {
+            const response = await fetch(
+                `https://api.github.com/repos/${this.username}/${this.repo}/git/trees/HEAD?recursive=1`,
+                {
+                    headers: {
+                        'Authorization': `token ${this.token}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                }
+            );
+            
+            if (!response.ok) {
+                throw new Error(`获取文件列表失败: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            const mindmapFiles = [];
+            
+            // 过滤出mindmaps文件夹下的.json文件
+            for (const file of data.tree) {
+                if (file.path.startsWith(`${this.folderName}/`) && 
+                    file.path.endsWith('.json') && 
+                    file.type === 'blob') {
+                    
+                    // 获取文件的详细信息
+                    const fileResponse = await fetch(
+                        `https://api.github.com/repos/${this.username}/${this.repo}/contents/${file.path}`,
+                        {
+                            headers: {
+                                'Authorization': `token ${this.token}`,
+                                'Accept': 'application/vnd.github.v3+json'
+                            }
+                        }
+                    );
+                    
+                    if (fileResponse.ok) {
+                        const fileData = await fileResponse.json();
+                        const relativePath = file.path.substring(`${this.folderName}/`.length);
+                        
+                        mindmapFiles.push({
+                            path: file.path,
+                            relativePath: relativePath,
+                            fileName: relativePath.split('/').pop(),
+                            folderPath: relativePath.includes('/') ? relativePath.substring(0, relativePath.lastIndexOf('/')) : '',
+                            sha: fileData.sha,
+                            size: fileData.size,
+                            lastModified: fileData.last_modified || fileData.updated_at,
+                            content: fileData.content
+                        });
+                    }
+                }
+            }
+            
+            return mindmapFiles;
+        } catch (error) {
+            console.error('获取GitHub文件列表失败:', error);
+            throw error;
+        }
+    }
+    
+    // 智能同步：比较本地和GitHub文件，同步最新版本
+    async smartSync() {
+        if (!this.isLoggedIn) {
+            throw new Error('请先登录');
+        }
+        
+        console.log('开始智能同步...');
+        
+        try {
+            // 获取GitHub上的所有文件
+            const githubFiles = await this.getAllMindmapFiles();
+            console.log('GitHub文件列表:', githubFiles);
+            
+            // 获取本地所有思维导图
+            const localMindmaps = window.mindmapManager.getAllMindmaps();
+            const localFolders = window.mindmapManager.getAllFolders();
+            
+            const syncResults = {
+                uploaded: 0,
+                downloaded: 0,
+                updated: 0,
+                errors: []
+            };
+            
+            // 创建本地文件映射
+            const localFileMap = new Map();
+            localMindmaps.forEach(mindmap => {
+                const folderPath = mindmap.folderId ? 
+                    window.mindmapManager.getFolder(mindmap.folderId).name : '';
+                const relativePath = folderPath ? `${folderPath}/${mindmap.fileName}` : mindmap.fileName;
+                localFileMap.set(relativePath, mindmap);
+            });
+            
+            // 创建GitHub文件映射
+            const githubFileMap = new Map();
+            githubFiles.forEach(file => {
+                githubFileMap.set(file.relativePath, file);
+            });
+            
+            // 处理GitHub上存在但本地不存在的文件（下载）
+            for (const [relativePath, githubFile] of githubFileMap) {
+                if (!localFileMap.has(relativePath)) {
+                    try {
+                        console.log('下载新文件:', relativePath);
+                        const content = atob(githubFile.content);
+                        const data = JSON.parse(content);
+                        
+                        // 解析文件名获取ID
+                        const fileName = githubFile.fileName;
+                        const idMatch = fileName.match(/_(\d+)\.json$/);
+                        if (idMatch) {
+                            const id = parseInt(idMatch[1]);
+                            
+                            // 创建本地思维导图
+                            const mindmap = {
+                                id: id,
+                                name: fileName.replace(/_\d+\.json$/, '').replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, ' ').trim(),
+                                folderId: githubFile.folderPath ? 
+                                    this.findOrCreateFolder(githubFile.folderPath, localFolders) : null,
+                                fileName: fileName,
+                                createdAt: new Date().toISOString(),
+                                updatedAt: githubFile.lastModified || new Date().toISOString(),
+                                data: data
+                            };
+                            
+                            window.mindmapManager.mindmaps.set(id, mindmap);
+                            syncResults.downloaded++;
+                        }
+                    } catch (error) {
+                        console.error('下载文件失败:', relativePath, error);
+                        syncResults.errors.push(`下载失败: ${relativePath} - ${error.message}`);
+                    }
+                }
+            }
+            
+            // 处理本地存在但GitHub上不存在的文件（上传）
+            for (const [relativePath, localMindmap] of localFileMap) {
+                if (!githubFileMap.has(relativePath)) {
+                    try {
+                        console.log('上传新文件:', relativePath);
+                        const folderPath = localMindmap.folderId ? 
+                            window.mindmapManager.getFolder(localMindmap.folderId).name : '';
+                        await this.saveData(localMindmap.data, localMindmap.fileName, folderPath);
+                        syncResults.uploaded++;
+                    } catch (error) {
+                        console.error('上传文件失败:', relativePath, error);
+                        syncResults.errors.push(`上传失败: ${relativePath} - ${error.message}`);
+                    }
+                } else {
+                    // 比较时间戳，决定是否需要更新
+                    const githubFile = githubFileMap.get(relativePath);
+                    const localTime = new Date(localMindmap.updatedAt).getTime();
+                    const githubTime = new Date(githubFile.lastModified).getTime();
+                    
+                    if (localTime > githubTime) {
+                        // 本地更新，上传到GitHub
+                        try {
+                            console.log('更新GitHub文件:', relativePath);
+                            const folderPath = localMindmap.folderId ? 
+                                window.mindmapManager.getFolder(localMindmap.folderId).name : '';
+                            await this.saveData(localMindmap.data, localMindmap.fileName, folderPath);
+                            syncResults.updated++;
+                        } catch (error) {
+                            console.error('更新GitHub文件失败:', relativePath, error);
+                            syncResults.errors.push(`更新失败: ${relativePath} - ${error.message}`);
+                        }
+                    } else if (githubTime > localTime) {
+                        // GitHub更新，下载到本地
+                        try {
+                            console.log('更新本地文件:', relativePath);
+                            const content = atob(githubFile.content);
+                            const data = JSON.parse(content);
+                            localMindmap.data = data;
+                            localMindmap.updatedAt = githubFile.lastModified;
+                            syncResults.updated++;
+                        } catch (error) {
+                            console.error('更新本地文件失败:', relativePath, error);
+                            syncResults.errors.push(`更新失败: ${relativePath} - ${error.message}`);
+                        }
+                    }
+                }
+            }
+            
+            // 保存本地更改
+            window.mindmapManager.saveToLocalStorage();
+            
+            console.log('智能同步完成:', syncResults);
+            return syncResults;
+            
+        } catch (error) {
+            console.error('智能同步失败:', error);
+            throw error;
+        }
+    }
+    
+    // 查找或创建文件夹
+    findOrCreateFolder(folderName, existingFolders) {
+        // 查找现有文件夹
+        for (const folder of existingFolders) {
+            if (folder.name === folderName) {
+                return folder.id;
+            }
+        }
+        
+        // 创建新文件夹
+        const newFolder = window.mindmapManager.createFolder(folderName);
+        return newFolder.id;
+    }
 }
 
 // 思维导图管理类
@@ -2661,51 +2876,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // 保存到云端
-    const githubSaveBtn = document.getElementById('githubSaveBtn');
-    if (githubSaveBtn) {
-        githubSaveBtn.addEventListener('click', async () => {
-        showGithubStatus('正在保存...', 'info');
-        githubSaveBtn.disabled = true;
-        
-        try {
-            if (!window.mindmapManager.currentMindmap) {
-                showGithubStatus('❌ 请先选择一个思维导图', 'error');
-                return;
-            }
-            
-            const state = window.mindMap.serializeState();
-            const folderPath = window.mindmapManager.currentMindmap.folderId ? 
-                window.mindmapManager.getFolder(window.mindmapManager.currentMindmap.folderId).name : '';
-            await window.githubSync.saveData(state, window.mindmapManager.currentMindmap.fileName, folderPath);
-            showGithubStatus('✅ 保存成功！', 'success');
-        } catch (error) {
-            showGithubStatus(`❌ 保存失败：${error.message}`, 'error');
-        }
-        
-        githubSaveBtn.disabled = false;
-        });
-    }
-    
-    // 从云端加载
-    const githubLoadBtn = document.getElementById('githubLoadBtn');
-    if (githubLoadBtn) {
-        githubLoadBtn.addEventListener('click', async () => {
-        showGithubStatus('正在同步云端数据...', 'info');
-        githubLoadBtn.disabled = true;
-        
-        try {
-            // 从GitHub同步思维导图列表
-            const count = await window.mindmapManager.syncFromGitHub();
-            updateMindmapList();
-            showGithubStatus(`✅ 同步成功！发现 ${count} 个思维导图`, 'success');
-        } catch (error) {
-            showGithubStatus(`❌ 同步失败：${error.message}`, 'error');
-        }
-        
-        githubLoadBtn.disabled = false;
-        });
-    }
+    // 注意：保存到云端和从云端加载功能已移除，现在使用智能同步功能
     
     // 退出登录
     const githubLogoutBtn = document.getElementById('githubLogoutBtn');
@@ -2833,20 +3004,27 @@ function setupMindmapManagerEvents() {
             syncAllBtn.textContent = '🔄 同步中...';
             
             try {
-                // 同步所有思维导图到GitHub
-                const mindmaps = window.mindmapManager.getAllMindmaps();
-                let successCount = 0;
+                // 使用智能同步功能
+                const results = await window.githubSync.smartSync();
                 
-                for (const mindmap of mindmaps) {
-                    if (mindmap.data) {
-                        const folderPath = mindmap.folderId ? 
-                            window.mindmapManager.getFolder(mindmap.folderId).name : '';
-                        await window.githubSync.saveData(mindmap.data, mindmap.fileName, folderPath);
-                        successCount++;
+                // 更新界面
+                updateMindmapList();
+                
+                // 显示同步结果
+                let message = `智能同步完成！\n`;
+                message += `📤 上传: ${results.uploaded} 个文件\n`;
+                message += `📥 下载: ${results.downloaded} 个文件\n`;
+                message += `🔄 更新: ${results.updated} 个文件\n`;
+                
+                if (results.errors.length > 0) {
+                    message += `\n❌ 错误: ${results.errors.length} 个\n`;
+                    message += results.errors.slice(0, 3).join('\n');
+                    if (results.errors.length > 3) {
+                        message += `\n... 还有 ${results.errors.length - 3} 个错误`;
                     }
                 }
                 
-                alert(`同步完成！成功同步 ${successCount} 个思维导图`);
+                alert(message);
             } catch (error) {
                 alert(`同步失败：${error.message}`);
             }
