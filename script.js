@@ -2034,9 +2034,8 @@ class GitHubSync {
             this.isLoggedIn = true;
             
             // 保存到localStorage
-            localStorage.setItem('github_username', username);
-            localStorage.setItem('github_repo', repo);
-            localStorage.setItem('github_token', token);
+            const config = { username, repo, token };
+            localStorage.setItem('githubConfig', JSON.stringify(config));
             
             return { success: true, user };
         } catch (error) {
@@ -2470,8 +2469,15 @@ class GitHubSync {
                 if (!localFileMap.has(relativePath)) {
                     try {
                         console.log('下载新文件:', relativePath);
-                        // GitHub API返回的content已经是base64编码的，需要先解码
-                        const content = atob(githubFile.content);
+                        // GitHub API返回的content是base64编码的，需要先解码
+                        let content;
+                        try {
+                            content = atob(githubFile.content);
+                        } catch (error) {
+                            console.error('Base64解码失败:', error);
+                            // 如果base64解码失败，尝试直接使用content
+                            content = githubFile.content;
+                        }
                         const data = JSON.parse(content);
                         
                         // 解析文件名获取ID
@@ -2527,7 +2533,10 @@ class GitHubSync {
                         localTimestamp: localTime,
                         githubTimestamp: githubTime,
                         localNewer: localTime > githubTime,
-                        githubNewer: githubTime > localTime
+                        githubNewer: githubTime > localTime,
+                        timeDiff: Math.abs(localTime - githubTime),
+                        localDate: new Date(localTime),
+                        githubDate: new Date(githubTime)
                     });
                     
                     if (localTime > githubTime) {
@@ -2546,8 +2555,15 @@ class GitHubSync {
                         // GitHub更新，下载到本地
                         try {
                             console.log('更新本地文件:', relativePath);
-                            // GitHub API返回的content已经是base64编码的，需要先解码
-                            const content = atob(githubFile.content);
+                            // GitHub API返回的content是base64编码的，需要先解码
+                            let content;
+                            try {
+                                content = atob(githubFile.content);
+                            } catch (error) {
+                                console.error('Base64解码失败:', error);
+                                // 如果base64解码失败，尝试直接使用content
+                                content = githubFile.content;
+                            }
                             const data = JSON.parse(content);
                             localMindmap.data = data;
                             localMindmap.updatedAt = githubFile.lastModified;
@@ -2560,7 +2576,14 @@ class GitHubSync {
                         // 时间戳相同，但检查数据是否真的相同
                         console.log('文件时间戳相同，检查数据一致性:', relativePath);
                         try {
-                            const githubContent = atob(githubFile.content);
+                            // GitHub API返回的content是base64编码的，需要先解码
+                            let githubContent;
+                            try {
+                                githubContent = atob(githubFile.content);
+                            } catch (error) {
+                                console.error('Base64解码失败:', error);
+                                githubContent = githubFile.content;
+                            }
                             const githubData = JSON.parse(githubContent);
                             const localData = localMindmap.data;
                             
@@ -3055,7 +3078,14 @@ function setupMindmapManagerEvents() {
     const syncAllBtn = document.getElementById('syncAllBtn');
     if (syncAllBtn) {
         syncAllBtn.addEventListener('click', async () => {
-            if (!window.githubSync.isLoggedIn) {
+            console.log('同步按钮点击，检查登录状态:', {
+                githubSync: !!window.githubSync,
+                isLoggedIn: window.githubSync?.isLoggedIn,
+                username: window.githubSync?.username,
+                repo: window.githubSync?.repo
+            });
+            
+            if (!window.githubSync || !window.githubSync.isLoggedIn) {
                 alert('请先登录GitHub');
                 return;
             }
@@ -3064,6 +3094,13 @@ function setupMindmapManagerEvents() {
             syncAllBtn.textContent = '🔄 同步中...';
             
             try {
+                // 在同步前，确保当前思维导图的状态已保存
+                if (window.mindMap && window.mindmapManager.currentMindmap) {
+                    const currentState = window.mindMap.serializeState();
+                    window.mindmapManager.updateMindmapData(window.mindmapManager.currentMindmap.id, currentState);
+                    console.log('同步前保存当前思维导图状态');
+                }
+                
                 // 使用智能同步功能
                 const results = await window.githubSync.smartSync();
                 
