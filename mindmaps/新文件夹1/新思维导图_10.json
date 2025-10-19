@@ -1,1 +1,0 @@
-"{\"nodes\":[{\"id\":1,\"text\":\"中心主题\",\"x\":410,\"y\":300,\"width\":120,\"height\":50,\"parentId\":null,\"collapsed\":false},{\"id\":2,\"text\":\"新节点\",\"x\":561,\"y\":260,\"width\":82,\"height\":50,\"parentId\":1,\"collapsed\":false},{\"id\":3,\"text\":\"新节点\",\"x\":561,\"y\":340,\"width\":82,\"height\":50,\"parentId\":1,\"collapsed\":false}],\"nextId\":4,\"rootId\":1}"
