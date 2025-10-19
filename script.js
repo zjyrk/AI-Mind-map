@@ -1929,28 +1929,54 @@ class GitHubSync {
         this.repo = repo;
         this.token = token;
         
-        // 验证token
+        // 验证token和仓库访问权限
         try {
-            const response = await fetch('https://api.github.com/user', {
+            // 首先验证token
+            const userResponse = await fetch('https://api.github.com/user', {
                 headers: {
                     'Authorization': `token ${token}`,
                     'Accept': 'application/vnd.github.v3+json'
                 }
             });
             
-            if (response.ok) {
-                const user = await response.json();
-                this.isLoggedIn = true;
-                
-                // 保存到localStorage
-                localStorage.setItem('github_username', username);
-                localStorage.setItem('github_repo', repo);
-                localStorage.setItem('github_token', token);
-                
-                return { success: true, user };
-            } else {
-                throw new Error('Token验证失败');
+            if (!userResponse.ok) {
+                if (userResponse.status === 401) {
+                    throw new Error('Token无效或已过期');
+                } else if (userResponse.status === 403) {
+                    throw new Error('Token权限不足，请确保有repo权限');
+                } else {
+                    throw new Error('Token验证失败');
+                }
             }
+            
+            const user = await userResponse.json();
+            
+            // 验证仓库访问权限
+            const repoResponse = await fetch(`https://api.github.com/repos/${username}/${repo}`, {
+                headers: {
+                    'Authorization': `token ${token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+            
+            if (!repoResponse.ok) {
+                if (repoResponse.status === 404) {
+                    throw new Error('仓库不存在或无访问权限');
+                } else if (repoResponse.status === 403) {
+                    throw new Error('Token没有访问此仓库的权限');
+                } else {
+                    throw new Error('仓库访问验证失败');
+                }
+            }
+            
+            this.isLoggedIn = true;
+            
+            // 保存到localStorage
+            localStorage.setItem('github_username', username);
+            localStorage.setItem('github_repo', repo);
+            localStorage.setItem('github_token', token);
+            
+            return { success: true, user };
         } catch (error) {
             return { success: false, error: error.message };
         }
@@ -2036,7 +2062,19 @@ class GitHubSync {
         
         if (!response.ok) {
             const error = await response.json();
-            throw new Error(error.message || '保存失败');
+            let errorMessage = '保存失败';
+            
+            if (response.status === 401) {
+                errorMessage = 'Token无效或已过期，请检查您的Personal Access Token';
+            } else if (response.status === 403) {
+                errorMessage = 'Token权限不足，请确保Token有repo权限';
+            } else if (response.status === 404) {
+                errorMessage = '仓库不存在或无访问权限，请检查用户名和仓库名';
+            } else if (error.message) {
+                errorMessage = error.message;
+            }
+            
+            throw new Error(errorMessage);
         }
         
         return await response.json();
@@ -2058,10 +2096,17 @@ class GitHubSync {
         );
         
         if (!response.ok) {
-            if (response.status === 404) {
-                throw new Error('云端没有找到数据文件');
+            let errorMessage = '加载失败';
+            
+            if (response.status === 401) {
+                errorMessage = 'Token无效或已过期，请检查您的Personal Access Token';
+            } else if (response.status === 403) {
+                errorMessage = 'Token权限不足，请确保Token有repo权限';
+            } else if (response.status === 404) {
+                errorMessage = '云端没有找到数据文件或仓库不存在';
             }
-            throw new Error('加载失败');
+            
+            throw new Error(errorMessage);
         }
         
         const fileData = await response.json();
