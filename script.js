@@ -2209,10 +2209,8 @@ class GitHubSync {
             throw new Error('请先登录');
         }
         
-        // 如果fileName已经包含文件夹路径，直接使用；否则添加默认文件夹
-        const filePath = fileName.includes('/') ? 
-            `${this.folderName}/${fileName}` : 
-            `${this.folderName}/${fileName}`;
+        // 直接使用传入的fileName，因为调用方已经构建好了完整路径
+        const filePath = `${this.folderName}/${fileName}`;
         console.log('删除文件路径:', filePath);
         
         // 首先获取文件的SHA
