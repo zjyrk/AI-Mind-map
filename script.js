@@ -2157,6 +2157,7 @@ class GitHubSync {
         }
         
         const filePath = `${this.folderName}/${fileName}`;
+        console.log('删除文件路径:', filePath);
         
         // 首先获取文件的SHA
         const getResponse = await fetch(
@@ -2170,10 +2171,16 @@ class GitHubSync {
         );
         
         if (!getResponse.ok) {
-            throw new Error('文件不存在');
+            if (getResponse.status === 404) {
+                console.warn('GitHub文件不存在，可能已经被删除或从未同步');
+                return { message: '文件不存在，可能已经被删除' };
+            }
+            const errorData = await getResponse.json().catch(() => ({}));
+            throw new Error(`获取文件信息失败: ${errorData.message || getResponse.statusText}`);
         }
         
         const fileData = await getResponse.json();
+        console.log('获取到文件SHA:', fileData.sha);
         
         // 删除文件
         const response = await fetch(
@@ -2193,10 +2200,13 @@ class GitHubSync {
         );
         
         if (!response.ok) {
-            throw new Error('删除失败');
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(`删除文件失败: ${errorData.message || response.statusText}`);
         }
         
-        return await response.json();
+        const result = await response.json();
+        console.log('GitHub文件删除成功:', result);
+        return result;
     }
 }
 
@@ -2735,14 +2745,44 @@ async function deleteMindmap(id) {
     const mindmap = window.mindmapManager.getMindmap(id);
     if (!mindmap) return;
     
-    if (!confirm(`确定要删除思维导图"${mindmap.name}"吗？`)) {
+    // 显示详细信息用于调试
+    console.log('准备删除的思维导图信息:', {
+        id: mindmap.id,
+        name: mindmap.name,
+        fileName: mindmap.fileName,
+        hasData: !!mindmap.data,
+        githubLoggedIn: window.githubSync.isLoggedIn
+    });
+    
+    if (!confirm(`确定要删除思维导图"${mindmap.name}"吗？\n\n文件名: ${mindmap.fileName}\nGitHub状态: ${window.githubSync.isLoggedIn ? '已登录' : '未登录'}`)) {
         return;
     }
     
     try {
+        let githubDeleteSuccess = false;
+        
         // 如果已登录GitHub，同时删除云端文件
-        if (window.githubSync.isLoggedIn && mindmap.fileName) {
-            await window.githubSync.deleteMindmap(mindmap.fileName);
+        if (window.githubSync.isLoggedIn) {
+            if (mindmap.fileName) {
+                console.log('尝试删除GitHub文件:', mindmap.fileName);
+                try {
+                    const result = await window.githubSync.deleteMindmap(mindmap.fileName);
+                    githubDeleteSuccess = true;
+                    console.log('GitHub文件删除成功:', result);
+                } catch (error) {
+                    console.warn('GitHub文件删除失败，可能文件不存在:', error.message);
+                    // 如果文件不存在，不算作错误，继续删除本地数据
+                    if (error.message.includes('文件不存在') || error.message.includes('404')) {
+                        githubDeleteSuccess = true; // 文件不存在也算成功
+                    } else {
+                        throw error; // 其他错误继续抛出
+                    }
+                }
+            } else {
+                console.warn('思维导图没有fileName属性，无法删除GitHub文件');
+            }
+        } else {
+            console.log('未登录GitHub，只删除本地数据');
         }
         
         // 删除本地数据
@@ -2754,8 +2794,15 @@ async function deleteMindmap(id) {
             window.mindMap = new MindMap();
         }
         
-        alert('删除成功');
+        if (window.githubSync.isLoggedIn && githubDeleteSuccess) {
+            alert('删除成功！本地和云端文件都已删除');
+        } else if (window.githubSync.isLoggedIn && !githubDeleteSuccess) {
+            alert('本地删除成功，但云端文件删除失败（可能文件不存在）');
+        } else {
+            alert('删除成功！');
+        }
     } catch (error) {
+        console.error('删除思维导图时出错:', error);
         alert(`删除失败：${error.message}`);
     }
 }
