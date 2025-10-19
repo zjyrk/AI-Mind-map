@@ -36,6 +36,11 @@ body {
     align-items: center;
 }
 
+.header-buttons {
+    display: flex;
+    gap: 8px;
+}
+
 .sidebar-header h3 {
     font-size: 18px;
     color: #333;
@@ -130,6 +135,96 @@ body {
 .mindmap-item-action.delete:hover {
     background: #ff4757;
     color: white;
+}
+
+/* 文件夹样式 */
+.folder-item {
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.folder-item:hover {
+    border-color: #667eea;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+}
+
+.folder-item.expanded {
+    background: #e3f2fd;
+    border-color: #2196f3;
+}
+
+.folder-item-name {
+    font-weight: 500;
+    color: #333;
+    margin-bottom: 4px;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.folder-item-name::before {
+    content: '📁';
+    font-size: 16px;
+}
+
+.folder-item.expanded .folder-item-name::before {
+    content: '📂';
+}
+
+.folder-item-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: #999;
+}
+
+.folder-item-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: none;
+    gap: 4px;
+}
+
+.folder-item:hover .folder-item-actions {
+    display: flex;
+}
+
+.folder-children {
+    margin-left: 20px;
+    margin-top: 8px;
+    border-left: 2px solid #e0e0e0;
+    padding-left: 12px;
+}
+
+.folder-children .mindmap-item {
+    margin-bottom: 6px;
+}
+
+/* 内联编辑样式 */
+.inline-edit {
+    background: white;
+    border: 2px solid #667eea;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 14px;
+    font-weight: 500;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.inline-edit:focus {
+    border-color: #4c63d2;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
 }
 
 .sidebar-footer {

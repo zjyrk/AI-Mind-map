@@ -2014,14 +2014,14 @@ class GitHubSync {
         return false;
     }
     
-    async saveData(data, fileName) {
+    async saveData(data, fileName, folderPath = '') {
         if (!this.isLoggedIn) {
             throw new Error('请先登录');
         }
         
         const content = JSON.stringify(data, null, 2);
         const encodedContent = btoa(unescape(encodeURIComponent(content)));
-        const filePath = `${this.folderName}/${fileName}`;
+        const filePath = folderPath ? `${this.folderName}/${folderPath}/${fileName}` : `${this.folderName}/${fileName}`;
         
         // 首先检查文件是否存在
         let sha = null;
@@ -2214,26 +2214,46 @@ class GitHubSync {
 class MindmapManager {
     constructor() {
         this.mindmaps = new Map(); // 存储所有思维导图
+        this.folders = new Map(); // 存储所有文件夹
         this.currentMindmap = null; // 当前选中的思维导图
         this.nextId = 1;
+        this.nextFolderId = 1;
     }
     
     // 创建新的思维导图
-    createMindmap(name, description = '') {
+    createMindmap(name = '新思维导图', folderId = null) {
         const id = this.nextId++;
         const mindmap = {
             id: id,
             name: name,
-            description: description,
+            folderId: folderId, // 所属文件夹ID
             fileName: `${name.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}_${id}.json`,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            data: null // 思维导图数据
+            data: null, // 思维导图数据
+            isEditing: false // 是否正在编辑名称
         };
         
         this.mindmaps.set(id, mindmap);
         this.saveToLocalStorage();
         return mindmap;
+    }
+    
+    // 创建新的文件夹
+    createFolder(name = '新文件夹') {
+        const id = this.nextFolderId++;
+        const folder = {
+            id: id,
+            name: name,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            expanded: true, // 默认展开
+            isEditing: false // 是否正在编辑名称
+        };
+        
+        this.folders.set(id, folder);
+        this.saveToLocalStorage();
+        return folder;
     }
     
     // 删除思维导图
@@ -2247,6 +2267,53 @@ class MindmapManager {
             return true;
         }
         return false;
+    }
+    
+    // 删除文件夹
+    deleteFolder(id) {
+        if (this.folders.has(id)) {
+            // 删除文件夹内的所有思维导图
+            const mindmapsInFolder = Array.from(this.mindmaps.values()).filter(m => m.folderId === id);
+            mindmapsInFolder.forEach(mindmap => {
+                this.mindmaps.delete(mindmap.id);
+            });
+            
+            this.folders.delete(id);
+            this.saveToLocalStorage();
+            return true;
+        }
+        return false;
+    }
+    
+    // 获取文件夹
+    getFolder(id) {
+        return this.folders.get(id);
+    }
+    
+    // 获取所有文件夹
+    getAllFolders() {
+        return Array.from(this.folders.values());
+    }
+    
+    // 切换文件夹展开状态
+    toggleFolder(id) {
+        const folder = this.folders.get(id);
+        if (folder) {
+            folder.expanded = !folder.expanded;
+            this.saveToLocalStorage();
+            return true;
+        }
+        return false;
+    }
+    
+    // 获取文件夹内的思维导图
+    getMindmapsInFolder(folderId) {
+        return Array.from(this.mindmaps.values()).filter(m => m.folderId === folderId);
+    }
+    
+    // 获取根目录的思维导图（不在任何文件夹中）
+    getRootMindmaps() {
+        return Array.from(this.mindmaps.values()).filter(m => !m.folderId);
     }
     
     // 获取思维导图
@@ -2286,8 +2353,10 @@ class MindmapManager {
         const saved = localStorage.getItem('mindmapManager');
         if (saved) {
             const data = JSON.parse(saved);
-            this.mindmaps = new Map(data.mindmaps);
+            this.mindmaps = new Map(data.mindmaps || []);
+            this.folders = new Map(data.folders || []);
             this.nextId = data.nextId || 1;
+            this.nextFolderId = data.nextFolderId || 1;
             
             // 恢复当前思维导图
             if (data.currentMindmapId) {
@@ -2300,7 +2369,9 @@ class MindmapManager {
     saveToLocalStorage() {
         const data = {
             mindmaps: Array.from(this.mindmaps.entries()),
+            folders: Array.from(this.folders.entries()),
             nextId: this.nextId,
+            nextFolderId: this.nextFolderId,
             currentMindmapId: this.currentMindmap ? this.currentMindmap.id : null
         };
         localStorage.setItem('mindmapManager', JSON.stringify(data));
@@ -2436,7 +2507,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             
             const state = window.mindMap.serializeState();
-            await window.githubSync.saveData(state, window.mindmapManager.currentMindmap.fileName);
+            const folderPath = window.mindmapManager.currentMindmap.folderId ? 
+                window.mindmapManager.getFolder(window.mindmapManager.currentMindmap.folderId).name : '';
+            await window.githubSync.saveData(state, window.mindmapManager.currentMindmap.fileName, folderPath);
             showGithubStatus('✅ 保存成功！', 'success');
         } catch (error) {
             showGithubStatus(`❌ 保存失败：${error.message}`, 'error');
@@ -2508,11 +2581,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // 设置思维导图管理相关事件
 function setupMindmapManagerEvents() {
+    // 新建文件夹按钮
+    const newFolderBtn = document.getElementById('newFolderBtn');
+    if (newFolderBtn) {
+        newFolderBtn.addEventListener('click', () => {
+            const folder = window.mindmapManager.createFolder();
+            updateMindmapList();
+            // 进入编辑状态
+            setTimeout(() => {
+                const input = document.querySelector(`[data-folder-id="${folder.id}"] .inline-edit`);
+                if (input) {
+                    input.focus();
+                    input.select();
+                }
+            }, 100);
+        });
+    }
+    
     // 新建思维导图按钮
     const newMindmapBtn = document.getElementById('newMindmapBtn');
     if (newMindmapBtn) {
         newMindmapBtn.addEventListener('click', () => {
-            document.getElementById('newMindmapModal').style.display = 'flex';
+            const mindmap = window.mindmapManager.createMindmap();
+            updateMindmapList();
+            selectMindmap(mindmap.id);
+            // 进入编辑状态
+            setTimeout(() => {
+                const input = document.querySelector(`[data-id="${mindmap.id}"] .inline-edit`);
+                if (input) {
+                    input.focus();
+                    input.select();
+                }
+            }, 100);
         });
     }
     
@@ -2571,7 +2671,9 @@ function setupMindmapManagerEvents() {
                 
                 for (const mindmap of mindmaps) {
                     if (mindmap.data) {
-                        await window.githubSync.saveData(mindmap.data, mindmap.fileName);
+                        const folderPath = mindmap.folderId ? 
+                            window.mindmapManager.getFolder(mindmap.folderId).name : '';
+                        await window.githubSync.saveData(mindmap.data, mindmap.fileName, folderPath);
                         successCount++;
                     }
                 }
@@ -2632,32 +2734,27 @@ function updateMindmapList() {
     const mindmapList = document.getElementById('mindmapList');
     if (!mindmapList) return;
     
-    const mindmaps = window.mindmapManager.getAllMindmaps();
+    const folders = window.mindmapManager.getAllFolders();
+    const rootMindmaps = window.mindmapManager.getRootMindmaps();
     
-    if (mindmaps.length === 0) {
+    if (folders.length === 0 && rootMindmaps.length === 0) {
         mindmapList.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">暂无思维导图<br>点击"新建"创建第一个</div>';
         return;
     }
     
-    mindmapList.innerHTML = mindmaps.map(mindmap => {
-        const isActive = window.mindmapManager.currentMindmap && 
-                        window.mindmapManager.currentMindmap.id === mindmap.id;
-        
-        return `
-            <div class="mindmap-item ${isActive ? 'active' : ''}" data-id="${mindmap.id}">
-                <div class="mindmap-item-actions">
-                    <button class="mindmap-item-action edit" title="编辑" data-action="edit" data-id="${mindmap.id}">✏️</button>
-                    <button class="mindmap-item-action delete" title="删除" data-action="delete" data-id="${mindmap.id}">🗑️</button>
-                </div>
-                <div class="mindmap-item-name">${mindmap.name}</div>
-                <div class="mindmap-item-description">${mindmap.description || '无描述'}</div>
-                <div class="mindmap-item-meta">
-                    <span>${new Date(mindmap.updatedAt).toLocaleDateString()}</span>
-                    <span>${mindmap.data ? '已保存' : '未保存'}</span>
-                </div>
-            </div>
-        `;
-    }).join('');
+    let html = '';
+    
+    // 渲染根目录的思维导图
+    rootMindmaps.forEach(mindmap => {
+        html += renderMindmapItem(mindmap);
+    });
+    
+    // 渲染文件夹及其内容
+    folders.forEach(folder => {
+        html += renderFolderItem(folder);
+    });
+    
+    mindmapList.innerHTML = html;
     
     // 移除旧的事件监听器（如果存在）
     if (mindmapList._clickHandler) {
@@ -2666,12 +2763,30 @@ function updateMindmapList() {
     
     // 创建新的事件处理函数
     const clickHandler = (e) => {
-        const mindmapItem = e.target.closest('.mindmap-item');
-        if (mindmapItem) {
-            const id = parseInt(mindmapItem.dataset.id);
-            selectMindmap(id);
+        // 处理内联编辑输入框
+        if (e.target.classList.contains('inline-edit')) {
+            handleInlineEdit(e.target);
+            return;
         }
         
+        // 处理思维导图点击
+        const mindmapItem = e.target.closest('.mindmap-item');
+        if (mindmapItem && mindmapItem.dataset.id) {
+            const id = parseInt(mindmapItem.dataset.id);
+            selectMindmap(id);
+            return;
+        }
+        
+        // 处理文件夹点击
+        const folderItem = e.target.closest('.folder-item');
+        if (folderItem && folderItem.dataset.folderId) {
+            const id = parseInt(folderItem.dataset.folderId);
+            window.mindmapManager.toggleFolder(id);
+            updateMindmapList();
+            return;
+        }
+        
+        // 处理操作按钮
         const actionBtn = e.target.closest('.mindmap-item-action');
         if (actionBtn) {
             const action = actionBtn.dataset.action;
@@ -2681,6 +2796,10 @@ function updateMindmapList() {
                 editMindmap(id);
             } else if (action === 'delete') {
                 deleteMindmap(id);
+            } else if (action === 'edit-folder') {
+                editFolder(id);
+            } else if (action === 'delete-folder') {
+                deleteFolder(id);
             }
         }
     };
@@ -2688,6 +2807,75 @@ function updateMindmapList() {
     // 添加新的事件监听器
     mindmapList.addEventListener('click', clickHandler);
     mindmapList._clickHandler = clickHandler;
+}
+
+// 渲染思维导图项目
+function renderMindmapItem(mindmap) {
+    const isActive = window.mindmapManager.currentMindmap && 
+                    window.mindmapManager.currentMindmap.id === mindmap.id;
+    
+    if (mindmap.isEditing) {
+        return `
+            <div class="mindmap-item ${isActive ? 'active' : ''}" data-id="${mindmap.id}">
+                <input type="text" class="inline-edit" value="${mindmap.name}" 
+                       data-action="save-name" data-id="${mindmap.id}" 
+                       data-type="mindmap" placeholder="输入思维导图名称">
+            </div>
+        `;
+    }
+    
+    return `
+        <div class="mindmap-item ${isActive ? 'active' : ''}" data-id="${mindmap.id}">
+            <div class="mindmap-item-actions">
+                <button class="mindmap-item-action edit" title="编辑" data-action="edit" data-id="${mindmap.id}">✏️</button>
+                <button class="mindmap-item-action delete" title="删除" data-action="delete" data-id="${mindmap.id}">🗑️</button>
+            </div>
+            <div class="mindmap-item-name">${mindmap.name}</div>
+            <div class="mindmap-item-meta">
+                <span>${new Date(mindmap.updatedAt).toLocaleDateString()}</span>
+                <span>${mindmap.data ? '已保存' : '未保存'}</span>
+            </div>
+        </div>
+    `;
+}
+
+// 渲染文件夹项目
+function renderFolderItem(folder) {
+    const mindmapsInFolder = window.mindmapManager.getMindmapsInFolder(folder.id);
+    
+    if (folder.isEditing) {
+        return `
+            <div class="folder-item" data-folder-id="${folder.id}">
+                <input type="text" class="inline-edit" value="${folder.name}" 
+                       data-action="save-name" data-id="${folder.id}" 
+                       data-type="folder" placeholder="输入文件夹名称">
+            </div>
+        `;
+    }
+    
+    let html = `
+        <div class="folder-item ${folder.expanded ? 'expanded' : ''}" data-folder-id="${folder.id}">
+            <div class="folder-item-actions">
+                <button class="mindmap-item-action edit" title="编辑" data-action="edit-folder" data-id="${folder.id}">✏️</button>
+                <button class="mindmap-item-action delete" title="删除" data-action="delete-folder" data-id="${folder.id}">🗑️</button>
+            </div>
+            <div class="folder-item-name">${folder.name}</div>
+            <div class="folder-item-meta">
+                <span>${new Date(folder.updatedAt).toLocaleDateString()}</span>
+                <span>${mindmapsInFolder.length} 个项目</span>
+            </div>
+        </div>
+    `;
+    
+    if (folder.expanded) {
+        html += '<div class="folder-children">';
+        mindmapsInFolder.forEach(mindmap => {
+            html += renderMindmapItem(mindmap);
+        });
+        html += '</div>';
+    }
+    
+    return html;
 }
 
 // 选择思维导图
@@ -2842,6 +3030,109 @@ function editMindmap(id) {
     
     // 显示编辑模态框
     document.getElementById('editMindmapModal').style.display = 'flex';
+}
+
+// 处理内联编辑
+function handleInlineEdit(input) {
+    input.addEventListener('blur', () => {
+        const id = parseInt(input.dataset.id);
+        const type = input.dataset.type;
+        const newName = input.value.trim();
+        
+        if (newName) {
+            if (type === 'mindmap') {
+                const mindmap = window.mindmapManager.getMindmap(id);
+                if (mindmap) {
+                    mindmap.name = newName;
+                    mindmap.updatedAt = new Date().toISOString();
+                    mindmap.isEditing = false;
+                    window.mindmapManager.saveToLocalStorage();
+                }
+            } else if (type === 'folder') {
+                const folder = window.mindmapManager.getFolder(id);
+                if (folder) {
+                    folder.name = newName;
+                    folder.updatedAt = new Date().toISOString();
+                    folder.isEditing = false;
+                    window.mindmapManager.saveToLocalStorage();
+                }
+            }
+        }
+        
+        updateMindmapList();
+    });
+    
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            input.blur();
+        } else if (e.key === 'Escape') {
+            const id = parseInt(input.dataset.id);
+            const type = input.dataset.type;
+            
+            if (type === 'mindmap') {
+                const mindmap = window.mindmapManager.getMindmap(id);
+                if (mindmap) {
+                    mindmap.isEditing = false;
+                }
+            } else if (type === 'folder') {
+                const folder = window.mindmapManager.getFolder(id);
+                if (folder) {
+                    folder.isEditing = false;
+                }
+            }
+            
+            updateMindmapList();
+        }
+    });
+    
+    // 选中所有文本
+    input.focus();
+    input.select();
+}
+
+// 编辑文件夹
+function editFolder(id) {
+    const folder = window.mindmapManager.getFolder(id);
+    if (!folder) return;
+    
+    folder.isEditing = true;
+    updateMindmapList();
+}
+
+// 删除文件夹
+async function deleteFolder(id) {
+    const folder = window.mindmapManager.getFolder(id);
+    if (!folder) return;
+    
+    const mindmapsInFolder = window.mindmapManager.getMindmapsInFolder(id);
+    const confirmMessage = `确定要删除文件夹"${folder.name}"吗？\n\n这将同时删除文件夹内的 ${mindmapsInFolder.length} 个思维导图。`;
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    try {
+        // 删除文件夹内的所有思维导图的GitHub文件
+        if (window.githubSync.isLoggedIn) {
+            for (const mindmap of mindmapsInFolder) {
+                if (mindmap.fileName) {
+                    try {
+                        await window.githubSync.deleteMindmap(mindmap.fileName);
+                    } catch (error) {
+                        console.warn('删除GitHub文件失败:', error.message);
+                    }
+                }
+            }
+        }
+        
+        // 删除本地数据
+        window.mindmapManager.deleteFolder(id);
+        updateMindmapList();
+        
+        alert('文件夹删除成功！');
+    } catch (error) {
+        alert(`删除失败：${error.message}`);
+    }
 }
 
 // 自动保存当前思维导图数据
